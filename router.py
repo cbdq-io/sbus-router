@@ -233,6 +233,66 @@ class ConnectionStringHelper:
         return self._protocol
 
 
+class EnvironmentConfigParser:
+    """
+    Parse the environment variables for configuration.
+
+    Parameters
+    ----------
+    environ : dict, optional
+        The dictionary to consume variables from, by default is os.environ.
+    """
+
+    def __init__(self, environ: dict = dict(os.environ)) -> None:
+        self._environ = environ
+
+
+class ServiceBusNamespaces:
+    """A class for holding details of Service Bus namespaces."""
+
+    def __init__(self) -> None:
+        self._namespaces = {}
+
+    def add(self, name: str, connection_string: str) -> None:
+        """
+        Add a namespace.
+
+        Parameters
+        ----------
+        name : str
+            The name of the namespace (e.g. "gbdev").
+        connection_string : str
+            The connection string for connecting to the namespace.
+        """
+        self._namespaces[name] = connection_string
+
+    def get(self, name: str) -> str:
+        """
+        Get the connection string of a namespace by name.
+
+        Parameters
+        ----------
+        name : str
+            The assigned name (as given in the add method) of the namespace.
+
+        Returns
+        -------
+        str
+            The connection string of the namespace.
+
+        Raises
+        ------
+        ValueError
+            If the provided name is not known.
+        """
+        try:
+            conn_str = self._namespaces[name]
+        except KeyError:
+            raise ValueError(f'Unknown namespace "{name}".')
+
+        return conn_str
+
+
 class SimpleSender(MessagingHandler):
     """
     Send a message to Azure Service Bus.

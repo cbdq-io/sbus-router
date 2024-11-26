@@ -1,6 +1,8 @@
 """Data Flow feature tests."""
 import json
+import time
 
+import testinfra
 from proton.reactor import Container
 from pytest_bdd import given, parsers, scenario, when
 
@@ -16,7 +18,22 @@ def test_inject_a_message_and_confirm_the_destination():
 
 @given('the landing Service Bus Emulator', target_fixture='sender_url')
 def _():
-    """the landing Service Bus Emulator."""
+    """
+    Wait for the Service Bus Emulator to be ready.
+
+    Then retun a connection string.
+    """
+    host = testinfra.get_host('local://')
+
+    while True:
+        cmd = host.run('docker logs servicebus-emulator')
+        logs = cmd.stdout
+
+        if 'Emulator Service is Successfully Up!' in logs:
+            break
+
+        time.sleep(1)
+
     conn_str = 'Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;'
     conn_str += 'SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;'
     conn_str = ConnectionStringHelper(conn_str)
