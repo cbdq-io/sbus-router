@@ -1,2 +1,3 @@
 azure-core
+jsonschema
 python-qpid-proton

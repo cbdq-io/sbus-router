@@ -20,7 +20,14 @@
 	// "forwardPorts": [],
 
 	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "pip install -Ur requirements.txt -r requirements-dev.txt"
+	"postCreateCommand": "pip install -Ur requirements.txt -r requirements-dev.txt",
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"alexkrechik.cucumberautocomplete"
+			]
+		}
+	}
 
 	// Configure tool-specific properties.
 	// "customizations": {},

@@ -33,10 +33,14 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
+import json
 import logging
 import os
+import sys
 from urllib.parse import urlparse
 
+import jsonschema
+import jsonschema.exceptions
 from azure.core.utils import parse_connection_string
 from proton import Message
 from proton.handlers import MessagingHandler
@@ -233,18 +237,77 @@ class ConnectionStringHelper:
         return self._protocol
 
 
-class EnvironmentConfigParser:
+class RouterRule:
     """
-    Parse the environment variables for configuration.
+    A class for handling a rule.
 
     Parameters
     ----------
-    environ : dict, optional
-        The dictionary to consume variables from, by default is os.environ.
+    name : str
+        The name of the rule.
+    definition : str
+        The rule definition (as a JSON string).
     """
 
-    def __init__(self, environ: dict = dict(os.environ)) -> None:
-        self._environ = environ
+    def __init__(self, name: str, definition: str) -> None:
+        self._definition = definition
+        self.name(name)
+        self._parsed_definition = self.parse_definition(definition)
+
+    def name(self, name: str = None) -> str:
+        """
+        Get or set the rule name.
+
+        Parameters
+        ----------
+        name : str, optional.
+            The name of the rule being set.
+
+        Returns
+        -------
+        str
+            The name of the set rule.
+        """
+        if name is not None:
+            self._name = name
+        return self._name
+
+    def parse_definition(self, definition: str) -> dict:
+        """
+        Parse the rule definition.
+
+        Parameters
+        ----------
+        definition : str
+            The rule definition (as a JSON string).
+
+        Returns
+        -------
+        dict
+            A parsed definition of the JSON string.
+
+        Raises
+        ------
+        json.decoder.JSONDecodeError
+            If the provided string can't be parsed as JSON.
+        jsonschema.exceptions.ValidationError
+            If the string was parsed as JSON, but doesn't comply with the
+            schema of the rules.
+        """
+        with open('rule-schema.json', 'r') as stream:
+            schema = json.load(stream)
+
+        try:
+            instance = json.loads(definition)
+            jsonschema.validate(instance=instance, schema=schema)
+        except json.decoder.JSONDecodeError:
+            logger.error(f'{self.name()} ("{definition}") is not valid JSON.')
+            sys.exit(2)
+        except jsonschema.exceptions.ValidationError as ex:
+            logger.error(f'{self.name()} is not valid {ex}')
+            sys.exit(2)
+
+        return instance
 
 
 class ServiceBusNamespaces:
@@ -264,7 +327,20 @@ class ServiceBusNamespaces:
         connection_string : str
             The connection string for connecting to the namespace.
         """
+        ConnectionStringHelper(connection_string)
         self._namespaces[name] = connection_string
+
+    def count(self) -> int:
+        """
+        Get the number of defined service bus namespaces.
+
+        Returns
+        -------
+        int
+            The count of service bus namespaces instances that have been
+            defined in the config.
+        """
+        return len(self._namespaces)
 
     def get(self, name: str) -> str:
         """
@@ -285,12 +361,76 @@ class ServiceBusNamespaces:
         ValueError
             If the provided name is not known.
         """
-        try:
-            conn_str = self._namespaces[name]
-        except KeyError:
-            raise ValueError(f'Unknown namespace "{name}".')
-
+        conn_str = self._namespaces[name]
         return conn_str
+
+
+class EnvironmentConfigParser:
+    """
+    Parse the environment variables for configuration.
+
+    Parameters
+    ----------
+    environ : dict, optional
+        The dictionary to consume variables from, by default is os.environ.
+    """
+
+    def __init__(self, environ: dict = dict(os.environ)) -> None:
+        self._environ = environ
+
+    def get_prefixed_values(self, prefix: str) -> list:
+        """
+        Get values from the environment that match a prefix.
+
+        Parameters
+        ----------
+        prefix : str
+            The prefix to look for.
+
+        Returns
+        -------
+        list
+            A list of list items, where each item contains two string
+            elements representing the key and the value.
+        """
+        response = []
+
+        for key, value in self._environ.items():
+            if key.startswith(prefix):
+                response.append([key, value])
+
+        return response
+
+    def service_bus_namespaces(self) -> ServiceBusNamespaces:
+        """
+        Get the Service Bus namespaces as defined in the environment.
+
+        Returns
+        -------
+        ServiceBusNamespaces
+            The Service Bus namspaces as defined in the configuration.
+
+        Raises
+        ------
+        ValueError
+            Raised if no namespaces have been defined.
+        """
+        env_values = self.get_prefixed_values('ROUTER_NAMESPACE_')
+        response = ServiceBusNamespaces()
+
+        for key_value_pair in env_values:
+            key = key_value_pair[0]
+            value = key_value_pair[1]
+            key_elements = key.split('_')
+
+            if len(key_elements) == 5 and key.endswith('CONNECTION_STRING'):
+                name = key_elements[2]
+                response.add(name, value)
+
+        if response.count() == 0:
+            raise ValueError('No namespace configuration found in environment.')
+
+        return response
 
 
 class SimpleSender(MessagingHandler):
