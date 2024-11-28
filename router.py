@@ -36,9 +36,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 import json
 import logging
 import os
+import re
 import sys
 from urllib.parse import urlparse
 
+import jmespath
 import jsonschema
 import jsonschema.exceptions
 from azure.core.utils import parse_connection_string
@@ -247,12 +249,128 @@ class RouterRule:
         The name of the rule.
     definition : str
         The rule definition (as a JSON string).
+
+    Attributes
+    ----------
+    definition : str
+        The definition as passed to the constructor.
+    destination_namespaces : str
+        The destination namespaces for messages matching this rule.
+    destination_topics : str
+        The destination  topics for the messages matching this rule.
+    jmespath : str
+        A JMESPath string for checking against a JSON payload.
+    regexp : str
+        A regular expression for comparing against the message, or if a
+        JMESPath string was provided, it will be used to compare against
+        the value returned from that.
+    source_topic : str
+        The name of the source topic that makes up some the the matching
+        criteria for the rule.
     """
 
     def __init__(self, name: str, definition: str) -> None:
-        self._definition = definition
+        self.definition = definition
         self.name(name)
-        self._parsed_definition = self.parse_definition(definition)
+        parsed_definition = self.parse_definition(definition)
+
+        if parsed_definition['destination_namespaces']:
+            self.destination_namespaces = parsed_definition['destination_namespaces'].split(',')
+        else:
+            self.destination_namespaces = []
+
+        if parsed_definition['destination_topics']:
+            self.destination_topics = parsed_definition['destination_topics'].split(',')
+        else:
+            self.destination_topics = []
+
+        self.jmespath = parsed_definition.get('jmespath', None)
+        self.regexp = parsed_definition.get('regexp', None)
+        self.source_topic = parsed_definition['source_topic']
+
+    def get_data(self, message: object) -> list:
+        """
+        Get the data required from the message to do a comparison.
+
+        If the message is binary, convert it to a string.  If the rule has a
+        jmespath then try and parse the message into JSON (not a failure if
+        this fails) and return the data from the jmes path for comparison.
+
+        Parameters
+        ----------
+        message : object (str/bytes)
+            The message to be parsed.
+
+        Returns
+        -------
+        list
+            The data for comparison.
+        """
+        if isinstance(message, bytes):
+            message = message.decode('utf-8')
+
+        if not self.jmespath:
+            return [message]
+
+        try:
+            message = json.loads(message)
+        except json.decoder.JSONDecodeError:
+            return None
+
+        result = jmespath.search(self.jmespath, message)
+
+        if isinstance(result, list):
+            return result
+
+        return [result]
+
+    def is_data_match(self, message: str) -> bool:
+        """
+        Check if the message content matches a regexp.
+
+        Parameters
+        ----------
+        message : str
+            The message to be checked.
+
+        Returns
+        -------
+        bool
+            Does the data match.
+        """
+        data = self.get_data(message)
+        prog = re.compile(self.regexp)
+
+        if data and any(prog.search(element) for element in data):
+            return True
+
+        return False
+
+    def is_match(self, source_topic_name: str, message: str) -> tuple:
+        """
+        Check if the provided message and source topics match this rule.
+
+        Parameters
+        ----------
+        source_topic_name : str
+            The name of the topic that this message was consumed from.
+        message : str
+            The message that was consumed from the topic.
+
+        Returns
+        -------
+        tuple[bool, destination_topic, destination_namespace]
+            A tuple containing if the rule is a match to the message, the
+            destination namespaces(s) and the destination topics(s).
+        """
+        if source_topic_name == self.source_topic:
+            if not self.regexp:
+                return True, self.destination_namespaces, self.destination_topics
+            elif self.is_data_match(message):
+                return True, self.destination_namespaces, self.destination_topics
+
+        # If we got here, it ain't a match.
+        return (False, None, None)
 
     def name(self, name: str = None) -> str:
         """
