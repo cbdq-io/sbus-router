@@ -13,8 +13,8 @@ USER appuser
 WORKDIR /home/appuser
 
 COPY --chown=appuser:appuser requirements.txt /home/appuser/requirements.txt
-COPY --chown=appuser:appuser router.py /home/appuser/router.py
-
 RUN pip install --no-cache-dir -r requirements.txt --user
+COPY --chown=appuser:appuser --chmod=0644 rule-schema.json /home/appuser/rule-schema.json
+COPY --chown=appuser:appuser --chmod=0755 router.py /home/appuser/router.py
 
 ENTRYPOINT [ "/home/appuser/router.py" ]

@@ -77,53 +77,6 @@ logger = get_logger(__file__)
 __version__ = '0.1.0'
 
 
-class AsyncSubscriptionHandler(MessagingHandler):
-    """
-    An implementation for the MessagingHandler.
-
-    Parameters
-    ----------
-    url : str
-        The URL to the subscription for the topic.
-    topic : str
-        The name of the topic to subscribe to.
-    subscription : str
-        The name of the subscription to subscribe to.
-    """
-
-    def __init__(self, url: str, topic: str, subscription: str):
-        super().__init__()
-        self.url = url
-        self.topic = topic
-        self.subscription = subscription
-
-    def on_start(self, event):
-        """
-        Initialise the connection to the topic/subscription on the namespace.
-
-        Parameters
-        ----------
-        event : proton.Event
-            The event that needs to be handled.
-        """
-        logger.debug(f'Connecting to {self.topic}/{self.subscription}...')
-        event.container.connect(self.url)
-        event.container.create_receiver(self.url)
-
-    def on_message(self, event: Event):
-        """
-        Handle a message event.
-
-        Parameters
-        ----------
-        event : proton.Event
-            The event that needs to be handled.
-        """
-        message = event.message
-        logger.debug(f'Received from {self.topic}/{self.subscription}: {message.body}')
-        # Add async message processing logic here
-
-
 class ConnectionStringHelper:
     """
     A class for handling Azure Service Bus Connection Strings.
@@ -338,6 +291,24 @@ class RouterRule:
         self.source_topic = parsed_definition['source_topic']
         self.parsed_definition = parsed_definition
 
+    def decode_message(self, message: bytes) -> str:
+        """
+        Decode bytes to a string.
+
+        Parameters
+        ----------
+        message : bytes
+            The message as a collection of bytes.
+
+        Returns
+        -------
+        str
+            The message decoded to be a string.
+        """
+        if isinstance(message, str):
+            return message
+        return message.decode('utf-8')
+
     def get_data(self, message: object) -> list:
         """
         Get the data required from the message to do a comparison.
@@ -356,8 +327,7 @@ class RouterRule:
         list
             The data for comparison.
         """
-        if isinstance(message, bytes):
-            message = message.decode('utf-8')
+        message = self.decode_message(message)
 
         if not self.jmespath:
             return [message]
@@ -365,12 +335,14 @@ class RouterRule:
         try:
             message = json.loads(message)
         except json.decoder.JSONDecodeError:
-            return None
+            return []
 
         result = jmespath.search(self.jmespath, message)
 
         if isinstance(result, list):
             return result
+        elif result is None:
+            return []
 
         return [result]
 
@@ -389,6 +361,7 @@ class RouterRule:
             Does the data match.
         """
         data = self.get_data(message)
+        print(f'data is "{data}".')
         prog = re.compile(self.regexp)
 
         if data and any(prog.search(element) for element in data):
@@ -413,6 +386,7 @@ class RouterRule:
             A tuple containing if the rule is a match to the message, the
             destination namespaces(s) and the destination topics(s).
         """
+        print(f'{source_topic_name}:{self.source_topic}')
         if source_topic_name == self.source_topic:
             if not self.regexp:
                 return True, self.destination_namespaces, self.destination_topics
@@ -495,8 +469,8 @@ class ServiceBusNamespaces:
         connection_string : str
             The connection string for connecting to the namespace.
         """
-        ConnectionStringHelper(connection_string)
-        self._namespaces[name] = connection_string
+        helper = ConnectionStringHelper(connection_string)
+        self._namespaces[name] = helper.amqp_url()
 
     def count(self) -> int:
         """
@@ -596,7 +570,7 @@ class EnvironmentConfigParser:
         str
             A URL suitable for AMQP connection.
         """
-        connection_string = os.environ.get('ROUTER_SOURCE_CONNECTION_STRING')
+        connection_string = os.environ['ROUTER_SOURCE_CONNECTION_STRING']
         helper = ConnectionStringHelper(connection_string)
         return helper.amqp_url()
 
@@ -642,15 +616,20 @@ class EnvironmentConfigParser:
             elements called topic and subscription.
         """
         response = []
+        found_values = []
         rules = self.get_rules()
 
         for rule in rules:
-            response.append(
-                {
-                    'subscription': rule.source_subscription,
-                    'topic': rule.source_topic
-                }
-            )
+            value = f'{rule.source_subscription}:{rule.source_topic}'
+
+            if value not in found_values:
+                response.append(
+                    {
+                        'subscription': rule.source_subscription,
+                        'topic': rule.source_topic
+                    }
+                )
+                found_values.append(value)
 
         return response
 
@@ -690,6 +669,81 @@ class SimpleSender(MessagingHandler):
         event.connection.close()
 
 
+class AsyncSubscriptionHandler(MessagingHandler):
+    """
+    An implementation for the MessagingHandler.
+
+    Parameters
+    ----------
+    url : str
+        The URL to the subscription for the topic.
+    topic : str
+        The name of the topic to subscribe to.
+    subscription : str
+        The name of the subscription to subscribe to.
+    """
+
+    def __init__(self, url: str, topic: str, subscription: str, rules: list[RouterRule]):
+        super().__init__()
+        self.url = url
+        self.topic = topic
+        self.subscription = subscription
+        self.rules = rules
+        config = EnvironmentConfigParser()
+        self.namespaces = config.service_bus_namespaces()
+
+    def forward_message(self, message: Message, destination_namespaces: list, destination_topics: list) -> None:
+        """
+        Forward a message to a designated topic.
+
+        Parameters
+        ----------
+        message : proton.Message
+            The message to be forwarded.
+        """
+        for idx, namespace_name in enumerate(destination_namespaces):
+            url = self.namespaces.get(namespace_name)
+            destination_topic = destination_topics[idx]
+            logger.debug(f'Sending message to {destination_topic} {message.body}')
+            Container(SimpleSender(url, destination_topic, message.body)).run()
+
+    def on_start(self, event):
+        """
+        Initialise the connection to the topic/subscription on the namespace.
+
+        Parameters
+        ----------
+        event : proton.Event
+            The event that needs to be handled.
+        """
+        logger.debug(f'Connecting to {self.topic}/{self.subscription}...')
+        event.container.connect(self.url)
+        event.container.create_receiver(self.url)
+        logger.debug(f'Connected successfully to {self.topic}/{self.subscription}')
+
+    def on_message(self, event: Event):
+        """
+        Handle a message event.
+
+        Parameters
+        ----------
+        event : proton.Event
+            The event that needs to be handled.
+        """
+        message = event.message
+        logger.debug(f'Received from {self.topic}/{self.subscription}: {message.body}')
+
+        for rule in self.rules:
+            result = rule.is_match(self.topic, message.body)
+            (is_match, destination_namespaces, destination_topics) = result
+
+            if is_match:
+                self.forward_message(message, destination_namespaces, destination_topics)
+                return
+
+        logger.warning(f'No match for message "{message.body}" sending to the DLQ.')
+
+
 async def listen_to_subscription(topic: str, subscription: str):
     """
     Listen to a subscription on a topic.
@@ -702,11 +756,13 @@ async def listen_to_subscription(topic: str, subscription: str):
         The name of the subscription that is associated with the topic.
     """
     config = EnvironmentConfigParser()
-    url = (
-        config.get_source_url(),
-        f'{topic}/Subscriptions/{subscription}'
+    url = config.get_source_url() + f'/{topic}/Subscriptions/{subscription}'
+    handler = AsyncSubscriptionHandler(
+        url,
+        topic,
+        subscription,
+        config.get_rules()
     )
-    handler = AsyncSubscriptionHandler(url, topic, subscription)
     container = Container(handler)
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, container.run)
@@ -716,8 +772,14 @@ async def main():
     """Configure the async tasks."""
     config = EnvironmentConfigParser()
     tasks = []
+
     for ts in config.topics_and_subscriptions():
         tasks.append(listen_to_subscription(ts['topic'], ts['subscription']))
+
+    if len(tasks) == 0:
+        logger.error('Zero tasks created for processing.')
+        sys.exit(2)
+
     await asyncio.gather(*tasks)
 
 

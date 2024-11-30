@@ -2,7 +2,7 @@
     "UserConfig": {
         "Namespaces": [
             {
-                "Name": "localhost",
+                "Name": "sbemulatorns",
                 "Queues": [],
                 "Topics": [
                     {
@@ -14,7 +14,7 @@
                         },
                         "Subscriptions": [
                             {
-                                "Name": "dlq/test",
+                                "Name": "test",
                                 "Properties": {
                                     "DeadLetteringOnMessageExpiration": false,
                                     "DefaultMessageTimeToLive": "PT1H",
@@ -36,7 +36,7 @@
                         },
                         "Subscriptions": [
                             {
-                                "Name": "topic.1/test",
+                                "Name": "test",
                                 "Properties": {
                                     "DeadLetteringOnMessageExpiration": false,
                                     "DefaultMessageTimeToLive": "PT1H",
@@ -58,7 +58,7 @@
                         },
                         "Subscriptions": [
                             {
-                                "Name": "topic.2/test",
+                                "Name": "test",
                                 "Properties": {
                                     "DeadLetteringOnMessageExpiration": false,
                                     "DefaultMessageTimeToLive": "PT1H",
@@ -80,7 +80,7 @@
                         },
                         "Subscriptions": [
                             {
-                                "Name": "topic.GB/test",
+                                "Name": "test",
                                 "Properties": {
                                     "DeadLetteringOnMessageExpiration": false,
                                     "DefaultMessageTimeToLive": "PT1H",
@@ -102,7 +102,7 @@
                         },
                         "Subscriptions": [
                             {
-                                "Name": "topic.IE/test",
+                                "Name": "test",
                                 "Properties": {
                                     "DeadLetteringOnMessageExpiration": false,
                                     "DefaultMessageTimeToLive": "PT1H",

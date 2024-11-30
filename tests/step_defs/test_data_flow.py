@@ -46,8 +46,6 @@ class Consumer(MessagingHandler):
         event.container.create_receiver(conn, self.topic)
 
     def on_message(self, event):
-        global id_found_in_message
-
         # Check if the timeout has been reached
         if time.time() - self.start_time > self.timeout:
             print(f'No message received on topic {self.topic} within timeout.')
