@@ -33,6 +33,7 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
+import asyncio
 import json
 import logging
 import os
@@ -44,10 +45,9 @@ import jmespath
 import jsonschema
 import jsonschema.exceptions
 from azure.core.utils import parse_connection_string
-from proton import Message
+from proton import Event, Message
 from proton.handlers import MessagingHandler
-
-# from proton.reactor import Container
+from proton.reactor import Container
 
 
 def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> logging.Logger:
@@ -74,6 +74,54 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
 
 logging.basicConfig()
 logger = get_logger(__file__)
+__version__ = '0.1.0'
+
+
+class AsyncSubscriptionHandler(MessagingHandler):
+    """
+    An implementation for the MessagingHandler.
+
+    Parameters
+    ----------
+    url : str
+        The URL to the subscription for the topic.
+    topic : str
+        The name of the topic to subscribe to.
+    subscription : str
+        The name of the subscription to subscribe to.
+    """
+
+    def __init__(self, url: str, topic: str, subscription: str):
+        super().__init__()
+        self.url = url
+        self.topic = topic
+        self.subscription = subscription
+
+    def on_start(self, event):
+        """
+        Initialise the connection to the topic/subscription on the namespace.
+
+        Parameters
+        ----------
+        event : proton.Event
+            The event that needs to be handled.
+        """
+        logger.debug(f'Connecting to {self.topic}/{self.subscription}...')
+        event.container.connect(self.url)
+        event.container.create_receiver(self.url)
+
+    def on_message(self, event: Event):
+        """
+        Handle a message event.
+
+        Parameters
+        ----------
+        event : proton.Event
+            The event that needs to be handled.
+        """
+        message = event.message
+        logger.debug(f'Received from {self.topic}/{self.subscription}: {message.body}')
+        # Add async message processing logic here
 
 
 class ConnectionStringHelper:
@@ -286,7 +334,9 @@ class RouterRule:
 
         self.jmespath = parsed_definition.get('jmespath', None)
         self.regexp = parsed_definition.get('regexp', None)
+        self.source_subscription = parsed_definition['source_subscription']
         self.source_topic = parsed_definition['source_topic']
+        self.parsed_definition = parsed_definition
 
     def get_data(self, message: object) -> list:
         """
@@ -513,11 +563,42 @@ class EnvironmentConfigParser:
         """
         response = []
 
-        for key, value in self._environ.items():
+        for key in sorted(self._environ.keys()):
             if key.startswith(prefix):
-                response.append([key, value])
+                response.append([key, self._environ[key]])
 
         return response
+
+    def get_rules(self) -> list:
+        """
+        Extract a list of routing rules from the environment.
+
+        Returns
+        -------
+        list
+            A list of RouterRule objects.
+        """
+        response = []
+
+        for item in self.get_prefixed_values('ROUTER_RULE_'):
+            name = item[0].replace('ROUTER_RULE_', '')
+            definition = item[1]
+            response.append(RouterRule(name, definition))
+
+        return response
+
+    def get_source_url(self) -> str:
+        """
+        Get the URL of the source Service Bus Namespace.
+
+        Returns
+        -------
+        str
+            A URL suitable for AMQP connection.
+        """
+        connection_string = os.environ.get('ROUTER_SOURCE_CONNECTION_STRING')
+        helper = ConnectionStringHelper(connection_string)
+        return helper.amqp_url()
 
     def service_bus_namespaces(self) -> ServiceBusNamespaces:
         """
@@ -547,6 +628,29 @@ class EnvironmentConfigParser:
 
         if response.count() == 0:
             raise ValueError('No namespace configuration found in environment.')
+
+        return response
+
+    def topics_and_subscriptions(self) -> list:
+        """
+        Extract a dictionary of the topics and subscriptions.
+
+        Returns
+        -------
+        list
+            A list of dictionaries.  Each dictionary will contain two
+            elements called topic and subscription.
+        """
+        response = []
+        rules = self.get_rules()
+
+        for rule in rules:
+            response.append(
+                {
+                    'subscription': rule.source_subscription,
+                    'topic': rule.source_topic
+                }
+            )
 
         return response
 
@@ -584,3 +688,39 @@ class SimpleSender(MessagingHandler):
         logger.debug('Message sent successfully!')
         event.sender.close()
         event.connection.close()
+
+
+async def listen_to_subscription(topic: str, subscription: str):
+    """
+    Listen to a subscription on a topic.
+
+    Parameters
+    ----------
+    topic : str
+        The name of the topic to be listened on.
+    subscription : str
+        The name of the subscription that is associated with the topic.
+    """
+    config = EnvironmentConfigParser()
+    url = (
+        config.get_source_url(),
+        f'{topic}/Subscriptions/{subscription}'
+    )
+    handler = AsyncSubscriptionHandler(url, topic, subscription)
+    container = Container(handler)
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, container.run)
+
+
+async def main():
+    """Configure the async tasks."""
+    config = EnvironmentConfigParser()
+    tasks = []
+    for ts in config.topics_and_subscriptions():
+        tasks.append(listen_to_subscription(ts['topic'], ts['subscription']))
+    await asyncio.gather(*tasks)
+
+
+if __name__ == '__main__':
+    logger.info(f'Starting version "{__version__}".')
+    asyncio.run(main())

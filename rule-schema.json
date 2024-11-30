@@ -34,6 +34,10 @@
             "description": "A regular expression pattern for matching data.",
             "type": "string"
         },
+        "source_subscription": {
+            "description": "The subscription from which data will be retrieved.",
+            "type": "string"
+        },
         "source_topic": {
             "description": "The topic from which data will be retrieved.",
             "type": "string"
@@ -42,6 +46,7 @@
     "required": [
         "destination_namespaces",
         "destination_topics",
+        "source_subscription",
         "source_topic"
     ],
     "type": "object"

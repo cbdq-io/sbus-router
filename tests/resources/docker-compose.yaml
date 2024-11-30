@@ -15,6 +15,13 @@ services:
     depends_on:
       - sqledge
 
+  router:
+    build: ../..
+    container_name: router
+    environment:
+      LOG_LEVEL: DEBUG
+    image: router:latest
+
   sqledge:
     container_name: "sqledge"
     image: "mcr.microsoft.com/azure-sql-edge:latest"

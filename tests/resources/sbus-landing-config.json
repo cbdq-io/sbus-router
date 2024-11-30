@@ -3,23 +3,30 @@
         "Namespaces": [
             {
                 "Name": "localhost",
-                "Queues": [
+                "Queues": [],
+                "Topics": [
                     {
-                        "Name": "queue.1",
+                        "Name": "dlq",
                         "Properties": {
-                            "DeadLetteringOnMessageExpiration": false,
                             "DefaultMessageTimeToLive": "PT1H",
                             "DuplicateDetectionHistoryTimeWindow": "PT20S",
-                            "ForwardDeadLetteredMessagesTo": "",
-                            "ForwardTo": "",
-                            "LockDuration": "PT1M",
-                            "MaxDeliveryCount": 10,
-                            "RequiresDuplicateDetection": false,
-                            "RequiresSession": false
-                        }
-                    }
-                ],
-                "Topics": [
+                            "RequiresDuplicateDetection": false
+                        },
+                        "Subscriptions": [
+                            {
+                                "Name": "dlq/test",
+                                "Properties": {
+                                    "DeadLetteringOnMessageExpiration": false,
+                                    "DefaultMessageTimeToLive": "PT1H",
+                                    "LockDuration": "PT1M",
+                                    "MaxDeliveryCount": 10,
+                                    "ForwardDeadLetteredMessagesTo": "",
+                                    "ForwardTo": "",
+                                    "RequiresSession": false
+                                }
+                            }
+                        ]
+                    },
                     {
                         "Name": "topic.1",
                         "Properties": {
@@ -29,7 +36,7 @@
                         },
                         "Subscriptions": [
                             {
-                                "Name": "subscription.1",
+                                "Name": "topic.1/test",
                                 "Properties": {
                                     "DeadLetteringOnMessageExpiration": false,
                                     "DefaultMessageTimeToLive": "PT1H",
@@ -38,28 +45,20 @@
                                     "ForwardDeadLetteredMessagesTo": "",
                                     "ForwardTo": "",
                                     "RequiresSession": false
-                                },
-                                "Rules": [
-                                    {
-                                        "Name": "app-prop-filter-1",
-                                        "Properties": {
-                                            "FilterType": "Correlation",
-                                            "CorrelationFilter": {
-                                                "ContentType": "application/text",
-                                                "CorrelationId": "id1",
-                                                "Label": "subject1",
-                                                "MessageId": "msgid1",
-                                                "ReplyTo": "someQueue",
-                                                "ReplyToSessionId": "sessionId",
-                                                "SessionId": "session1",
-                                                "To": "xyz"
-                                            }
-                                        }
-                                    }
-                                ]
-                            },
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "Name": "topic.2",
+                        "Properties": {
+                            "DefaultMessageTimeToLive": "PT1H",
+                            "DuplicateDetectionHistoryTimeWindow": "PT20S",
+                            "RequiresDuplicateDetection": false
+                        },
+                        "Subscriptions": [
                             {
-                                "Name": "subscription.2",
+                                "Name": "topic.2/test",
                                 "Properties": {
                                     "DeadLetteringOnMessageExpiration": false,
                                     "DefaultMessageTimeToLive": "PT1H",
@@ -68,23 +67,42 @@
                                     "ForwardDeadLetteredMessagesTo": "",
                                     "ForwardTo": "",
                                     "RequiresSession": false
-                                },
-                                "Rules": [
-                                    {
-                                        "Name": "user-prop-filter-1",
-                                        "Properties": {
-                                            "FilterType": "Correlation",
-                                            "CorrelationFilter": {
-                                                "Properties": {
-                                                    "prop3": "value3"
-                                                }
-                                            }
-                                        }
-                                    }
-                                ]
-                            },
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "Name": "topic.GB",
+                        "Properties": {
+                            "DefaultMessageTimeToLive": "PT1H",
+                            "DuplicateDetectionHistoryTimeWindow": "PT20S",
+                            "RequiresDuplicateDetection": false
+                        },
+                        "Subscriptions": [
                             {
-                                "Name": "subscription.3",
+                                "Name": "topic.GB/test",
+                                "Properties": {
+                                    "DeadLetteringOnMessageExpiration": false,
+                                    "DefaultMessageTimeToLive": "PT1H",
+                                    "LockDuration": "PT1M",
+                                    "MaxDeliveryCount": 10,
+                                    "ForwardDeadLetteredMessagesTo": "",
+                                    "ForwardTo": "",
+                                    "RequiresSession": false
+                                }
+                            }
+                        ]
+                    },
+                    {
+                        "Name": "topic.IE",
+                        "Properties": {
+                            "DefaultMessageTimeToLive": "PT1H",
+                            "DuplicateDetectionHistoryTimeWindow": "PT20S",
+                            "RequiresDuplicateDetection": false
+                        },
+                        "Subscriptions": [
+                            {
+                                "Name": "topic.IE/test",
                                 "Properties": {
                                     "DeadLetteringOnMessageExpiration": false,
                                     "DefaultMessageTimeToLive": "PT1H",
