@@ -1,66 +1,60 @@
-"""Data Flow feature tests."""
 import json
-import time
+import logging
 
 import pytest
-import testinfra
+from proton import Message
 from proton.handlers import MessagingHandler
 from proton.reactor import Container
 from pytest_bdd import given, parsers, scenario, then, when
 
-from router import ConnectionStringHelper, SimpleSender, get_logger
+from router import ConnectionStringHelper
 
-logger = get_logger(__file__)
-
-
-class TestMessageId:
-    def __init__(self) -> None:
-        self.id = None
-        self.id_found_in_message = False
-        self.topic_name = None
-        self.url = None
-
-    def __str__(self):
-        """Print the contents of the object."""
-        response = f'Expected to find a message with id "{self.id}" '
-        response += f'in the "{self.topic_name}" topic.'
-        return response
+logger = logging.getLogger(__name__)
 
 
-class Consumer(MessagingHandler):
-    def __init__(self, url, topic, timeout):
-        super(Consumer, self).__init__()
+class SimpleSender(MessagingHandler):
+    def __init__(self, url: str, target: str, message_body: Message) -> None:
+        super(SimpleSender, self).__init__()
         self.url = url
-        self.topic = topic
-        self.timeout = timeout
-        self.start_time = None
+        self.target = target
+        self.message_body = message_body
 
     def on_start(self, event):
-        # Store the start time to calculate the elapsed time
-        self.start_time = time.time()
-
-        # Create a connection to the broker
+        logger.debug(f'Creating a connection to "{self.url}".')
         conn = event.container.connect(self.url)
+        self.sender = event.container.create_sender(conn, self.target)
 
-        # Create a receiver link (consumer) on the topic
-        event.container.create_receiver(conn, self.topic)
+    def on_sendable(self, event):
+        message = Message(body=self.message_body)
+        event.sender.send(message)
+        logger.debug(f'Message sent "{self.message_body}".')
+        event.sender.close()
+        event.connection.close()
+
+
+class Recv(MessagingHandler):
+    def __init__(self, url: str, topic: str):
+        super(Recv, self).__init__()
+        self.url = f'{url}/{topic}/Subscriptions/test'
+        logger.debug(f'Receiver URL is "{self.url}".')
+        self.topic = topic
+        self.received_message = None
+
+    def on_start(self, event):
+        """Set up the connection and receive."""
+        logger.debug(f'Creating a connection to "{self.url}".')
+        event.container.connect(self.url)
+        event.container.create_receiver(self.url)
 
     def on_message(self, event):
-        # Check if the timeout has been reached
-        if time.time() - self.start_time > self.timeout:
-            print(f'No message received on topic {self.topic} within timeout.')
+        """Handle incoming message."""
+        logger.debug(f'Received message: {event.message.body}')
+        self.received_message = event.message.body
+        event.connection.close()
 
-        # Handle the incoming message
-        message = event.message
-        print(f'Received message: {message.body}')
-        data = json.loads(message.body)
-        test_widget.id_found_in_message = data['id'] == test_widget.id
-
-    def on_disconnected(self, event):
-        print('Disconnected from broker.')
-
-
-test_widget = TestMessageId()
+    def get_received_message(self):
+        """Return the received message."""
+        return self.received_message
 
 
 @scenario('data-flow.feature', 'Inject a Message and Confirm the Destination')
@@ -68,54 +62,37 @@ def test_inject_a_message_and_confirm_the_destination():
     """Inject a Message and Confirm the Destination."""
 
 
-@given('the landing Service Bus Emulator')
+@given('the landing Service Bus Emulator', target_fixture='test_details')
 def _():
-    """
-    Wait for the Service Bus Emulator to be ready.
-
-    Then return a connection string.
-    """
-    host = testinfra.get_host('local://')
-
-    while True:
-        cmd = host.run('docker logs servicebus-emulator')
-        logs = cmd.stdout
-
-        if 'Emulator Service is Successfully Up!' in logs:
-            break
-
-        time.sleep(1)
-
+    """Wait for the Service Bus Emulator to be ready."""
     conn_str = 'Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;'
     conn_str += 'SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;'
     conn_str = ConnectionStringHelper(conn_str)
     url = conn_str.amqp_url()
-    logger.debug(f'AMQP URL is "{url}".')
-    test_widget.url = url
+    return {'url': url}
 
 
 @when(parsers.parse('the landed topic data is {input_data_file} into {topic_name}'))
-def _(input_data_file: str, topic_name: str) -> None:
-    """the landed topic data is <input_data_file> into <topic>."""
+def _(input_data_file: str, topic_name: str, test_details: dict) -> None:
+    """Inject the landed topic data."""
     id = input_data_file.split('-')[1].split('.')[0]
-    test_widget.id = int(id)
+    test_details['expected_id'] = int(id)
     input_data_file_name = f'tests/resources/input-data/{input_data_file}'
 
     with open(input_data_file_name, 'rt') as stream:
         data = json.load(stream)
 
     message = json.dumps(data)
-    Container(SimpleSender(test_widget.url, topic_name, message)).run()
+    Container(SimpleSender(test_details['url'], topic_name, message)).run()
 
 
 @then(parsers.parse('read message with the expected ID will be on the {output_topic}'))
-def _(output_topic: str):
-    """read message with the expected ID will be on the <output_topic>."""
+def _(output_topic: str, test_details: dict):
+    """Ensure the expected message is read from the output topic."""
     if output_topic == 'N/A':
         pytest.skip('No output traffic expected.')
 
-    test_widget.id_found_in_message = False
-    test_widget.topic_name = output_topic
-    container = Container(Consumer(test_widget.url, output_topic, 1))
+    handler = Recv(test_details['url'], output_topic)
+    container = Container(handler)
     container.run()
-    assert test_widget.id_found_in_message, str(test_widget)
+    assert handler.get_received_message() == 'ARSE'

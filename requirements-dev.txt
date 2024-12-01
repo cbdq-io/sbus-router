@@ -4,6 +4,7 @@ flake8-docstrings
 flake8-quotes
 isort
 pytest-cov
+pytest-timeout
 radon
 testinfra-bdd
 yamllint

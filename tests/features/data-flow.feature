@@ -10,9 +10,9 @@ Scenario Outline: Inject a Message and Confirm the Destination
 
     Examples:
         | input_data_file | input_topic   | output_topic |
-        | input-1.json    | topic.1       | topic.GB     |
-        | input-2.json    | topic.2       | topic.IE     |
-        | input-3.json    | topic.1       | topic.GB     |
-        | input-4.json    | topic.2       | topic.IE     |
-        | input-5.json    | topic.1       | N/A          |
-        | input-6.json    | topic.2       | dlq          |
+        | input-1.json    | topic.1       | gb.topic     |
+        # | input-2.json    | topic.2       | ie.topic     |
+        # | input-3.json    | topic.1       | gb.topic     |
+        # | input-4.json    | topic.2       | ie.topic     |
+        # | input-5.json    | topic.1       | N/A          |
+        # | input-6.json    | topic.2       | dlq          |

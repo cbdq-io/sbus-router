@@ -2,7 +2,7 @@
 
 TAG = 0.1.0
 
-all: lint build test
+all: lint build clean test
 
 build:
 	docker compose -f tests/resources/docker-compose.yaml build
@@ -21,4 +21,4 @@ tag:
 
 test:
 	docker compose -f tests/resources/docker-compose.yaml up -d --wait
-	PYTHONPATH=. pytest
+	PYTHONPATH=. pytest --timeout=5

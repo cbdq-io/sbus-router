@@ -520,6 +520,17 @@ class EnvironmentConfigParser:
     def __init__(self, environ: dict = dict(os.environ)) -> None:
         self._environ = environ
 
+    def get_dead_letter_queue(self) -> str:
+        """
+        Return the DLQ topic name.
+
+        Returns
+        -------
+        str
+            The name of the DLQ topic.
+        """
+        return os.environ['ROUTER_DLQ_TOPIC']
+
     def get_prefixed_values(self, prefix: str) -> list:
         """
         Get values from the environment that match a prefix.
@@ -634,41 +645,6 @@ class EnvironmentConfigParser:
         return response
 
 
-class SimpleSender(MessagingHandler):
-    """
-    Send a message to Azure Service Bus.
-
-    Parameters
-    ----------
-    url : str
-        The URL to send the message to.
-    target : str
-        The queue or topic name to send to.
-    message_body : Message
-        The message to be sent.
-    """
-
-    def __init__(self, url: str, target: str, message_body: Message) -> None:
-        super(SimpleSender, self).__init__()
-        self.url = url
-        self.target = target
-        self.message_body = message_body
-
-    def on_start(self, event):
-        """Create a connection to a URL."""
-        logger.debug(f'Creating a connection to "{self.url}".')
-        conn = event.container.connect(self.url)
-        self.sender = event.container.create_sender(conn, self.target)
-
-    def on_sendable(self, event):
-        """Send a message to a sender connection."""
-        message = Message(body=self.message_body)
-        event.sender.send(message)
-        logger.debug('Message sent successfully!')
-        event.sender.close()
-        event.connection.close()
-
-
 class AsyncSubscriptionHandler(MessagingHandler):
     """
     An implementation for the MessagingHandler.
@@ -691,21 +667,73 @@ class AsyncSubscriptionHandler(MessagingHandler):
         self.rules = rules
         config = EnvironmentConfigParser()
         self.namespaces = config.service_bus_namespaces()
+        self.dlq = config.get_dead_letter_queue()
+        self.connections = {}
+        self.senders = {}
 
-    def forward_message(self, message: Message, destination_namespaces: list, destination_topics: list) -> None:
+    def get_or_create_sender(self, url: str, topic: str):
         """
-        Forward a message to a designated topic.
+        Get or create a sender for the specified URL and topic within the same Container.
+
+        Parameters
+        ----------
+        url : str
+            The Service Bus or broker URL.
+        topic : str
+            The topic to which the sender will send messages.
+
+        Returns
+        -------
+        Sender
+            A sender object for the topic.
+        """
+        if topic not in self.senders:
+            try:
+                # Retrieve or create the connection
+                if url not in self.connections:
+                    logger.debug(f'Creating connection for URL: {url}')
+                    connection = self.container.connect(url)
+                    self.connections[url] = connection
+                else:
+                    connection = self.connections[url]
+
+                # Create a session on the connection
+                logger.debug(f'Creating session for connection: {url}')
+                session = connection.session()
+
+                # Create the sender on the session
+                logger.debug(f'Creating sender for topic: {topic} on connection: {url}')
+                sender = session.sender(topic)
+                self.senders[topic] = sender
+                logger.debug(f'Successfully created sender for topic: {topic}')
+            except Exception as e:
+                logger.error(f'Failed to create sender for topic {topic}: {e}')
+                raise
+
+        return self.senders[topic]
+
+    def forward_message(self, message: Message, destination_namespaces: list, destination_topics: list):
+        """
+        Forward a message to specified topics synchronously.
 
         Parameters
         ----------
         message : proton.Message
-            The message to be forwarded.
+            The message to forward.
+        destination_namespaces : list
+            Namespaces where the message will be forwarded.
+        destination_topics : list
+            Topics where the message will be forwarded.
         """
         for idx, namespace_name in enumerate(destination_namespaces):
             url = self.namespaces.get(namespace_name)
+            if not url:
+                raise ValueError(f'Namespace {namespace_name} not found.')
+
             destination_topic = destination_topics[idx]
-            logger.debug(f'Sending message to {destination_topic} {message.body}')
-            Container(SimpleSender(url, destination_topic, message.body)).run()
+            sender = self.get_or_create_sender(url, destination_topic)
+            sender.send(message)
+            logger.debug(f'Message sent to {destination_topic} in namespace {namespace_name}.')
 
     def on_start(self, event):
         """
@@ -716,9 +744,11 @@ class AsyncSubscriptionHandler(MessagingHandler):
         event : proton.Event
             The event that needs to be handled.
         """
-        logger.debug(f'Connecting to {self.topic}/{self.subscription}...')
-        event.container.connect(self.url)
-        event.container.create_receiver(self.url)
+        logger.debug(f'Connecting to "{self.url}"')
+        connection = event.container.connect(self.url)
+        self.connections[self.url] = connection
+        logger.debug(f'Creating receiver for {self.topic}/Subscriptions/{self.subscription}')
+        event.container.create_receiver(connection, source=f'{self.topic}/Subscriptions/{self.subscription}')
         logger.debug(f'Connected successfully to {self.topic}/{self.subscription}')
 
     def on_message(self, event: Event):
@@ -731,17 +761,55 @@ class AsyncSubscriptionHandler(MessagingHandler):
             The event that needs to be handled.
         """
         message = event.message
-        logger.debug(f'Received from {self.topic}/{self.subscription}: {message.body}')
+        logger.debug(f'Message received on {self.topic}/{self.subscription}: {message.body}')
 
+        try:
+            result = self.process_message(message)
+
+            if result == 0:
+                event.delivery.settle()
+                logger.debug(f'Message successfully processed and acknowledged: {message.body}')
+            elif result == 1:
+                logger.error(f'Message matched but forwarding failed, will retry: {message.body}')
+                event.delivery.abort()
+            else:
+                event.delivery.settle()
+                logger.debug(f'Message sent to DLQ and acknowledged: {message.body}')
+        except Exception as e:
+            logger.error(f'Error processing message: {e}')
+
+    def process_message(self, message: Message) -> int:
+        """
+        Process the received message asynchronously.
+
+        Parameters
+        ----------
+        message: proton.Message
+            The message to be processed.
+
+        Returns
+        -------
+        int
+            Zero if message is matched to a rule and forwarded successfully,
+            One if message is matched, but an error occurs during forwarding.
+            Two if the message is not matched to any rules.
+        """
         for rule in self.rules:
-            result = rule.is_match(self.topic, message.body)
-            (is_match, destination_namespaces, destination_topics) = result
+            is_match, destination_namespaces, destination_topics = rule.is_match(self.topic, message.body)
 
             if is_match:
-                self.forward_message(message, destination_namespaces, destination_topics)
-                return
+                try:
+                    logger.debug(f'Matched message successfully to rule {rule.name()}.')
+                    self.forward_message(message, destination_namespaces, destination_topics)
+                    logger.debug(f'Message forwarded to destinations: {destination_topics}')
+                    return 0
+                except Exception as e:
+                    logger.error(f'Failed to forward message: {e}')
+                    return 1
 
-        logger.warning(f'No match for message "{message.body}" sending to the DLQ.')
+        logger.warning(f'No rules matched for message: {message.body}')
+        self.forward_message(message, [self.url], [self.dlq])
+        return 2
 
 
 async def listen_to_subscription(topic: str, subscription: str):
@@ -756,7 +824,7 @@ async def listen_to_subscription(topic: str, subscription: str):
         The name of the subscription that is associated with the topic.
     """
     config = EnvironmentConfigParser()
-    url = config.get_source_url() + f'/{topic}/Subscriptions/{subscription}'
+    url = config.get_source_url()
     handler = AsyncSubscriptionHandler(
         url,
         topic,
