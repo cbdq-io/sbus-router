@@ -33,7 +33,6 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
-import asyncio
 import json
 import logging
 import os
@@ -45,7 +44,7 @@ import jmespath
 import jsonschema
 import jsonschema.exceptions
 from azure.core.utils import parse_connection_string
-from proton import Event, Message
+from proton import Message
 from proton.handlers import MessagingHandler
 from proton.reactor import Container
 
@@ -442,8 +441,8 @@ class RouterRule:
         try:
             instance = json.loads(definition)
             jsonschema.validate(instance=instance, schema=schema)
-        except json.decoder.JSONDecodeError:
-            logger.error(f'{self.name()} ("{definition}") is not valid JSON.')
+        except json.decoder.JSONDecodeError as ex:
+            logger.error(f'{self.name()} ("{definition}") is not valid JSON.  {ex}')
             sys.exit(2)
         except jsonschema.exceptions.ValidationError as ex:
             logger.error(f'{self.name()} is not valid {ex}')
@@ -554,7 +553,7 @@ class EnvironmentConfigParser:
 
         return response
 
-    def get_rules(self) -> list:
+    def get_rules(self) -> list[RouterRule]:
         """
         Extract a list of routing rules from the environment.
 
@@ -645,72 +644,20 @@ class EnvironmentConfigParser:
         return response
 
 
-class AsyncSubscriptionHandler(MessagingHandler):
-    """
-    An implementation for the MessagingHandler.
+class Router(MessagingHandler):
+    """An implementation for the MessagingHandler."""
 
-    Parameters
-    ----------
-    url : str
-        The URL to the subscription for the topic.
-    topic : str
-        The name of the topic to subscribe to.
-    subscription : str
-        The name of the subscription to subscribe to.
-    """
-
-    def __init__(self, url: str, topic: str, subscription: str, rules: list[RouterRule]):
+    def __init__(self, config: EnvironmentConfigParser):
         super().__init__()
-        self.url = url
-        self.topic = topic
-        self.subscription = subscription
-        self.rules = rules
-        config = EnvironmentConfigParser()
-        self.namespaces = config.service_bus_namespaces()
-        self.dlq = config.get_dead_letter_queue()
+        self.config = config
         self.connections = {}
+        self.dlq_topic = config.get_dead_letter_queue()
+        self.namespaces = config.service_bus_namespaces()
+        self.rules = config.get_rules()
         self.senders = {}
-
-    def get_or_create_sender(self, url: str, topic: str):
-        """
-        Get or create a sender for the specified URL and topic within the same Container.
-
-        Parameters
-        ----------
-        url : str
-            The Service Bus or broker URL.
-        topic : str
-            The topic to which the sender will send messages.
-
-        Returns
-        -------
-        Sender
-            A sender object for the topic.
-        """
-        if topic not in self.senders:
-            try:
-                # Retrieve or create the connection
-                if url not in self.connections:
-                    logger.debug(f'Creating connection for URL: {url}')
-                    connection = self.container.connect(url)
-                    self.connections[url] = connection
-                else:
-                    connection = self.connections[url]
-
-                # Create a session on the connection
-                logger.debug(f'Creating session for connection: {url}')
-                session = connection.session()
-
-                # Create the sender on the session
-                logger.debug(f'Creating sender for topic: {topic} on connection: {url}')
-                sender = session.sender(topic)
-                self.senders[topic] = sender
-                logger.debug(f'Successfully created sender for topic: {topic}')
-            except Exception as e:
-                logger.error(f'Failed to create sender for topic {topic}: {e}')
-                raise
-
-        return self.senders[topic]
+        self.sources = []
+        self.source_namespace_url = config.get_source_url()
+        self.parse_config_data()
 
     def forward_message(self, message: Message, destination_namespaces: list, destination_topics: list):
         """
@@ -726,64 +673,85 @@ class AsyncSubscriptionHandler(MessagingHandler):
             Topics where the message will be forwarded.
         """
         for idx, namespace_name in enumerate(destination_namespaces):
-            url = self.namespaces.get(namespace_name)
-            if not url:
-                raise ValueError(f'Namespace {namespace_name} not found.')
-
             destination_topic = destination_topics[idx]
-            sender = self.get_or_create_sender(url, destination_topic)
+            sender_name = f'{namespace_name}/{destination_topic}'
+            sender = self.senders[sender_name]
             sender.send(message)
             logger.debug(f'Message sent to {destination_topic} in namespace {namespace_name}.')
 
-    def on_start(self, event):
-        """
-        Initialise the connection to the topic/subscription on the namespace.
-
-        Parameters
-        ----------
-        event : proton.Event
-            The event that needs to be handled.
-        """
-        logger.debug(f'Connecting to "{self.url}"')
-        connection = event.container.connect(self.url)
-        self.connections[self.url] = connection
-        logger.debug(f'Creating receiver for {self.topic}/Subscriptions/{self.subscription}')
-        event.container.create_receiver(connection, source=f'{self.topic}/Subscriptions/{self.subscription}')
-        logger.debug(f'Connected successfully to {self.topic}/{self.subscription}')
-
-    def on_message(self, event: Event):
-        """
-        Handle a message event.
-
-        Parameters
-        ----------
-        event : proton.Event
-            The event that needs to be handled.
-        """
+    def on_message(self, event):
+        """Handle a message event."""
         message = event.message
-        logger.debug(f'Message received on {self.topic}/{self.subscription}: {message.body}')
+        logger.debug(f'Message event "{message.body}" from {event.link.source.address}.')
+        source_topic = event.link.source.address.split('/')[0]
+        self.process_message(source_topic, message)
 
-        try:
-            result = self.process_message(message)
+    def on_sendable(self, event):
+        """Respond to a sendable event."""
+        logger.debug('Sendable event.')
 
-            if result == 0:
-                event.delivery.settle()
-                logger.debug(f'Message successfully processed and acknowledged: {message.body}')
-            elif result == 1:
-                logger.error(f'Message matched but forwarding failed, will retry: {message.body}')
-                event.delivery.abort()
-            else:
-                event.delivery.settle()
-                logger.debug(f'Message sent to DLQ and acknowledged: {message.body}')
-        except Exception as e:
-            logger.error(f'Error processing message: {e}')
+    def on_start(self, event):
+        """Respond to a start event."""
+        logger.debug('Start event.')
 
-    def process_message(self, message: Message) -> int:
+        for url in self.connections.keys():
+            hostname = urlparse(url).hostname
+            logger.debug(f'Creating a connection for {hostname}...')
+            connection = event.container.connect(url)
+            self.connections[url] = connection
+            logger.info(f'Successfully created a connection for {hostname}.')
+
+        connection = self.connections[self.source_namespace_url]
+
+        for source in self.sources:
+            logger.debug(f'Creating a receiver for "{source}".')
+            event.container.create_receiver(connection, source=source)
+
+        logger.debug(f'Creating a sender for the DLQ "{self.dlq_topic}"...')
+        dlq_sender = event.container.create_sender(connection, target=self.dlq_topic)
+
+        for sender in self.senders.keys():
+            logger.debug(f'Creating a sender for "{sender}".')
+            namespace, topic = tuple(sender.split('/'))
+            url = self.namespaces.get(namespace)
+            connection = self.connections[url]
+            self.senders[sender] = event.container.create_sender(connection, target=topic)
+
+        self.senders['DLQ'] = dlq_sender
+
+    def parse_config_data(self) -> dict:
+        """Create a dict of connections with the URL as a key."""
+        url_list = [self.source_namespace_url]
+        service_bus_namespaces = self.config.service_bus_namespaces()
+        sources = []
+
+        for rule in self.rules:
+            source = f'{rule.source_topic}/Subscriptions/{rule.source_subscription}'
+            sources.append(source)
+
+            for idx, dest_namespace in enumerate(rule.destination_namespaces):
+                url = service_bus_namespaces.get(dest_namespace)
+                url_list.append(url)
+                dest_topic = rule.destination_topics[idx]
+                sender = f'{dest_namespace}/{dest_topic}'
+                self.senders[sender] = None
+
+        # Make URL list unique values.
+        url_list = list(set(url_list))
+
+        for url in url_list:
+            self.connections[url] = None
+
+        self.sources = list(set(sources))
+
+    def process_message(self, source_topic: str, message: Message) -> int:
         """
         Process the received message asynchronously.
 
         Parameters
         ----------
+        source_topic : str
+            The name of the topic where the message was received from.
         message: proton.Message
             The message to be processed.
 
@@ -794,8 +762,10 @@ class AsyncSubscriptionHandler(MessagingHandler):
             One if message is matched, but an error occurs during forwarding.
             Two if the message is not matched to any rules.
         """
+        logger.debug('Process message...')
+
         for rule in self.rules:
-            is_match, destination_namespaces, destination_topics = rule.is_match(self.topic, message.body)
+            is_match, destination_namespaces, destination_topics = rule.is_match(source_topic, message.body)
 
             if is_match:
                 try:
@@ -808,49 +778,12 @@ class AsyncSubscriptionHandler(MessagingHandler):
                     return 1
 
         logger.warning(f'No rules matched for message: {message.body}')
-        self.forward_message(message, [self.url], [self.dlq])
+        message.send(self.senders['DLQ'])
         return 2
-
-
-async def listen_to_subscription(topic: str, subscription: str):
-    """
-    Listen to a subscription on a topic.
-
-    Parameters
-    ----------
-    topic : str
-        The name of the topic to be listened on.
-    subscription : str
-        The name of the subscription that is associated with the topic.
-    """
-    config = EnvironmentConfigParser()
-    url = config.get_source_url()
-    handler = AsyncSubscriptionHandler(
-        url,
-        topic,
-        subscription,
-        config.get_rules()
-    )
-    container = Container(handler)
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, container.run)
-
-
-async def main():
-    """Configure the async tasks."""
-    config = EnvironmentConfigParser()
-    tasks = []
-
-    for ts in config.topics_and_subscriptions():
-        tasks.append(listen_to_subscription(ts['topic'], ts['subscription']))
-
-    if len(tasks) == 0:
-        logger.error('Zero tasks created for processing.')
-        sys.exit(2)
-
-    await asyncio.gather(*tasks)
 
 
 if __name__ == '__main__':
     logger.info(f'Starting version "{__version__}".')
-    asyncio.run(main())
+    router = Router(EnvironmentConfigParser())
+    container = Container(router)
+    container.run()

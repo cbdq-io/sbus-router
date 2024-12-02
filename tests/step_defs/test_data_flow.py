@@ -4,62 +4,13 @@ import time
 
 import pytest
 from proton import Message
-from proton.handlers import MessagingHandler
-from proton.reactor import Container
+from proton._exceptions import Timeout
+from proton.utils import BlockingConnection
 from pytest_bdd import given, parsers, scenario, then, when
 
-from router import ConnectionStringHelper
+from router import ConnectionStringHelper, get_logger
 
-logger = logging.getLogger(__name__)
-
-
-class SimpleSender(MessagingHandler):
-    def __init__(self, url: str, target: str, message_body: Message) -> None:
-        super(SimpleSender, self).__init__()
-        self.url = url
-        self.target = target
-        self.message_body = message_body
-
-    def on_start(self, event):
-        logger.debug(f'Creating a connection to "{self.url}".')
-        conn = event.container.connect(self.url)
-        self.sender = event.container.create_sender(conn, self.target)
-
-    def on_sendable(self, event):
-        message = Message(body=self.message_body)
-        event.sender.send(message)
-        logger.debug(f'Message sent "{self.message_body}".')
-        event.sender.close()
-        event.connection.close()
-
-
-class Recv(MessagingHandler):
-    def __init__(self, url: str, topic: str):
-        super(Recv, self).__init__()
-        self.url = url
-        self.topic = topic
-        self.received_message = None
-
-    def on_start(self, event):
-        """Set up the connection and receive."""
-        logger.debug(f'Creating a connection to "{self.url}".')
-        conn = event.container.connect(self.url)
-        event.container.create_receiver(conn, source=f'{self.topic}/Subscriptions/test')
-
-    def on_message(self, event):
-        """Handle incoming message."""
-        logger.debug(f'Received message: {event.message.body}')
-        self.received_message = event.message.body
-        event.receiver.close()
-        event.connection.close()
-
-    def get_received_message(self):
-        """Return the received message."""
-        return self.received_message
-
-    def run(self):
-        container = Container(self)
-        container.run(timeout=10)
+logger = get_logger(__name__, logging.DEBUG)
 
 
 @scenario('data-flow.feature', 'Inject a Message and Confirm the Destination')
@@ -67,46 +18,73 @@ def test_inject_a_message_and_confirm_the_destination():
     """Inject a Message and Confirm the Destination."""
 
 
-@given('the landing Service Bus Emulator', target_fixture='test_details')
+@given(parsers.parse('the input topic is {input_topic}'), target_fixture='input_topic')
+def _(input_topic: str):
+    """the input topic is <input_topic>."""
+    return input_topic
+
+
+@given('the landing Service Bus Emulator', target_fixture='aqmp_url')
 def _():
-    """Wait for the Service Bus Emulator to be ready."""
+    """the landing Service Bus Emulator."""
     conn_str = 'Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;'
     conn_str += 'SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;'
     conn_str = ConnectionStringHelper(conn_str)
-    url = conn_str.amqp_url()
-    return {'url': url}
+    return conn_str.amqp_url()
 
 
-@when(parsers.parse('the landed topic data is {input_data_file} into {topic_name}'))
-def _(input_data_file: str, topic_name: str, test_details: dict) -> None:
-    """Inject the landed topic data."""
-    id = input_data_file.split('-')[1].split('.')[0]
-    test_details['expected_id'] = int(id)
+@given(parsers.parse('the message contents is {input_data_file}'), target_fixture='message_body')
+def _(input_data_file: str):
+    """the message contents is <input_data_file>."""
     input_data_file_name = f'tests/resources/input-data/{input_data_file}'
 
     with open(input_data_file_name, 'rt') as stream:
         data = json.load(stream)
 
-    message = json.dumps(data)
-    Container(SimpleSender(test_details['url'], topic_name, message)).run()
+    return json.dumps(data)
 
 
-def get_message(url: str, topic: str) -> str:
-    time.sleep(1)
-    handler = Recv(url, topic)
-    container = Container(handler)
-    container.run(timeout=5)
-    message = handler.get_received_message()
-    return message
+@given(parsers.parse('the output topic is {output_topic}'), target_fixture='output_topic')
+def _(output_topic: str):
+    """the output topic is <output_topic>."""
+    return output_topic
 
 
-@then(parsers.parse('read message with the expected ID will be on the {output_topic}'))
-def _(output_topic: str, test_details: dict):
-    """Ensure the expected message is read from the output topic."""
+@when('the input message is sent')
+def _(aqmp_url: str, input_topic: str, output_topic: str, message_body: str):
+    """the input message is sent."""
     if output_topic == 'N/A':
-        pytest.skip('No output traffic expected.')
+        conn = BlockingConnection(aqmp_url)
+        sender = conn.create_sender(input_topic)
+        sender.send(Message(body=message_body))
+        pytest.skip(f'Output topic is "{output_topic}".')
 
-    message = get_message(test_details['url'], output_topic)
-    assert message is not None
-    message = json.loads(message)
-    assert message['id'] == test_details['expected_id']
+
+@then('the expected output message is received')
+def _(aqmp_url: str, input_topic: str, output_topic: str, message_body: str):
+    """The expected output message is received."""
+    conn = BlockingConnection(aqmp_url)
+    receiver = conn.create_receiver(f'{output_topic}/Subscriptions/test')
+    logger.debug(f'Receiver for "{output_topic}" created at {time.time()}.')
+
+    time.sleep(0.5)  # Add delay to ensure the receiver is fully ready
+
+    sender = conn.create_sender(input_topic)
+    logger.debug(f'Sending message "{message_body}" to "{input_topic}" at {time.time()}.')
+    sender.send(Message(body=message_body))
+
+    for attempt in range(10):  # Retry receiving for up to 10 seconds
+        try:
+            logger.debug(f'Attempt {attempt + 1} to receive message from "{output_topic}".')
+            received_message = receiver.receive(timeout=1).body
+            logger.debug(f'Message received: "{received_message}" at {time.time()}.')
+            receiver.accept()
+            break
+        except Timeout as e:
+            logger.warning(f'Receive attempt {attempt + 1} timed out: {e}')
+            received_message = None
+    else:
+        pytest.fail(f'Message not received within the retry limit from "{output_topic}".')
+
+    conn.close()
+    assert received_message == message_body
