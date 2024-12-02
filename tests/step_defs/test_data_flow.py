@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 
 import pytest
 from proton import Message
@@ -35,26 +36,30 @@ class SimpleSender(MessagingHandler):
 class Recv(MessagingHandler):
     def __init__(self, url: str, topic: str):
         super(Recv, self).__init__()
-        self.url = f'{url}/{topic}/Subscriptions/test'
-        logger.debug(f'Receiver URL is "{self.url}".')
+        self.url = url
         self.topic = topic
         self.received_message = None
 
     def on_start(self, event):
         """Set up the connection and receive."""
         logger.debug(f'Creating a connection to "{self.url}".')
-        event.container.connect(self.url)
-        event.container.create_receiver(self.url)
+        conn = event.container.connect(self.url)
+        event.container.create_receiver(conn, source=f'{self.topic}/Subscriptions/test')
 
     def on_message(self, event):
         """Handle incoming message."""
         logger.debug(f'Received message: {event.message.body}')
         self.received_message = event.message.body
+        event.receiver.close()
         event.connection.close()
 
     def get_received_message(self):
         """Return the received message."""
         return self.received_message
+
+    def run(self):
+        container = Container(self)
+        container.run(timeout=10)
 
 
 @scenario('data-flow.feature', 'Inject a Message and Confirm the Destination')
@@ -86,13 +91,22 @@ def _(input_data_file: str, topic_name: str, test_details: dict) -> None:
     Container(SimpleSender(test_details['url'], topic_name, message)).run()
 
 
+def get_message(url: str, topic: str) -> str:
+    time.sleep(1)
+    handler = Recv(url, topic)
+    container = Container(handler)
+    container.run(timeout=5)
+    message = handler.get_received_message()
+    return message
+
+
 @then(parsers.parse('read message with the expected ID will be on the {output_topic}'))
 def _(output_topic: str, test_details: dict):
     """Ensure the expected message is read from the output topic."""
     if output_topic == 'N/A':
         pytest.skip('No output traffic expected.')
 
-    handler = Recv(test_details['url'], output_topic)
-    container = Container(handler)
-    container.run()
-    assert handler.get_received_message() == 'ARSE'
+    message = get_message(test_details['url'], output_topic)
+    assert message is not None
+    message = json.loads(message)
+    assert message['id'] == test_details['expected_id']
