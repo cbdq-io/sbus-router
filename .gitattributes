@@ -1,0 +1,17 @@
+# These files are binary and should be left untouched
+# (binary is a macro for -text -diff)
+*.class         binary
+*.dll           binary
+*.ear           binary
+*.jar           binary
+*.so            binary
+*.war           binary
+*.jks           binary
+
+# Common build-tool wrapper scripts ('.cmd' versions are handled by 'Common.gitattributes')
+mvnw            text eol=lf
+gradlew         text eol=lf
+
+# Files we don't want changed regardless of being on Windows or not.
+*.java          text diff=java eol=lf
+*               text eol=lf
