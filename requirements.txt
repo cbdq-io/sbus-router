@@ -1,0 +1,4 @@
+azure-core
+jmespath
+jsonschema
+python-qpid-proton
