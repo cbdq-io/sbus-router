@@ -1,147 +1,147 @@
 {
-    "UserConfig": {
-        "Namespaces": [
-            {
-                "Name": "sbemulatorns",
-                "Queues": [],
-                "Topics": [
-                    {
-                        "Name": "connection.test",
-                        "Properties": {
-                            "DefaultMessageTimeToLive": "PT1H",
-                            "DuplicateDetectionHistoryTimeWindow": "PT20S",
-                            "RequiresDuplicateDetection": false
-                        },
-                        "Subscriptions": [
-                            {
-                                "Name": "test",
-                                "Properties": {
-                                    "DeadLetteringOnMessageExpiration": false,
-                                    "DefaultMessageTimeToLive": "PT1H",
-                                    "LockDuration": "PT1M",
-                                    "MaxDeliveryCount": 10,
-                                    "ForwardDeadLetteredMessagesTo": "",
-                                    "ForwardTo": "",
-                                    "RequiresSession": false
-                                }
-                            }
-                        ]
-                    },
-                    {
-                        "Name": "dlq",
-                        "Properties": {
-                            "DefaultMessageTimeToLive": "PT1H",
-                            "DuplicateDetectionHistoryTimeWindow": "PT20S",
-                            "RequiresDuplicateDetection": false
-                        },
-                        "Subscriptions": [
-                            {
-                                "Name": "test",
-                                "Properties": {
-                                    "DeadLetteringOnMessageExpiration": false,
-                                    "DefaultMessageTimeToLive": "PT1H",
-                                    "LockDuration": "PT1M",
-                                    "MaxDeliveryCount": 10,
-                                    "ForwardDeadLetteredMessagesTo": "",
-                                    "ForwardTo": "",
-                                    "RequiresSession": false
-                                }
-                            }
-                        ]
-                    },
-                    {
-                        "Name": "topic.1",
-                        "Properties": {
-                            "DefaultMessageTimeToLive": "PT1H",
-                            "DuplicateDetectionHistoryTimeWindow": "PT20S",
-                            "RequiresDuplicateDetection": false
-                        },
-                        "Subscriptions": [
-                            {
-                                "Name": "test",
-                                "Properties": {
-                                    "DeadLetteringOnMessageExpiration": false,
-                                    "DefaultMessageTimeToLive": "PT1H",
-                                    "LockDuration": "PT1M",
-                                    "MaxDeliveryCount": 10,
-                                    "ForwardDeadLetteredMessagesTo": "",
-                                    "ForwardTo": "",
-                                    "RequiresSession": false
-                                }
-                            }
-                        ]
-                    },
-                    {
-                        "Name": "topic.2",
-                        "Properties": {
-                            "DefaultMessageTimeToLive": "PT1H",
-                            "DuplicateDetectionHistoryTimeWindow": "PT20S",
-                            "RequiresDuplicateDetection": false
-                        },
-                        "Subscriptions": [
-                            {
-                                "Name": "test",
-                                "Properties": {
-                                    "DeadLetteringOnMessageExpiration": false,
-                                    "DefaultMessageTimeToLive": "PT1H",
-                                    "LockDuration": "PT1M",
-                                    "MaxDeliveryCount": 10,
-                                    "ForwardDeadLetteredMessagesTo": "",
-                                    "ForwardTo": "",
-                                    "RequiresSession": false
-                                }
-                            }
-                        ]
-                    },
-                    {
-                        "Name": "gb.topic",
-                        "Properties": {
-                            "DefaultMessageTimeToLive": "PT1H",
-                            "DuplicateDetectionHistoryTimeWindow": "PT20S",
-                            "RequiresDuplicateDetection": false
-                        },
-                        "Subscriptions": [
-                            {
-                                "Name": "test",
-                                "Properties": {
-                                    "DeadLetteringOnMessageExpiration": false,
-                                    "DefaultMessageTimeToLive": "PT1H",
-                                    "LockDuration": "PT1M",
-                                    "MaxDeliveryCount": 10,
-                                    "ForwardDeadLetteredMessagesTo": "",
-                                    "ForwardTo": "",
-                                    "RequiresSession": false
-                                }
-                            }
-                        ]
-                    },
-                    {
-                        "Name": "ie.topic",
-                        "Properties": {
-                            "DefaultMessageTimeToLive": "PT1H",
-                            "DuplicateDetectionHistoryTimeWindow": "PT20S",
-                            "RequiresDuplicateDetection": false
-                        },
-                        "Subscriptions": [
-                            {
-                                "Name": "test",
-                                "Properties": {
-                                    "DeadLetteringOnMessageExpiration": false,
-                                    "DefaultMessageTimeToLive": "PT1H",
-                                    "LockDuration": "PT1M",
-                                    "MaxDeliveryCount": 10,
-                                    "ForwardDeadLetteredMessagesTo": "",
-                                    "ForwardTo": "",
-                                    "RequiresSession": false
-                                }
-                            }
-                        ]
-                    }
-                ]
-            }
-        ],
-        "Logging": {
-            "Type": "Console"
-        }
+  "UserConfig": {
+    "Namespaces": [
+      {
+        "Name": "sbemulatorns",
+        "Queues": [],
+        "Topics": [
+          {
+            "Name": "connection.test",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H",
+              "DuplicateDetectionHistoryTimeWindow": "PT20S",
+              "RequiresDuplicateDetection": false
+            },
+            "Subscriptions": [
+              {
+                "Name": "test",
+                "Properties": {
+                  "DeadLetteringOnMessageExpiration": false,
+                  "DefaultMessageTimeToLive": "PT1H",
+                  "LockDuration": "PT1M",
+                  "MaxDeliveryCount": 10,
+                  "ForwardDeadLetteredMessagesTo": "",
+                  "ForwardTo": "",
+                  "RequiresSession": false
+                }
+              }
+            ]
+          },
+          {
+            "Name": "dlq",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H",
+              "DuplicateDetectionHistoryTimeWindow": "PT20S",
+              "RequiresDuplicateDetection": false
+            },
+            "Subscriptions": [
+              {
+                "Name": "test",
+                "Properties": {
+                  "DeadLetteringOnMessageExpiration": false,
+                  "DefaultMessageTimeToLive": "PT1H",
+                  "LockDuration": "PT1M",
+                  "MaxDeliveryCount": 10,
+                  "ForwardDeadLetteredMessagesTo": "",
+                  "ForwardTo": "",
+                  "RequiresSession": false
+                }
+              }
+            ]
+          },
+          {
+            "Name": "topic.1",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H",
+              "DuplicateDetectionHistoryTimeWindow": "PT20S",
+              "RequiresDuplicateDetection": false
+            },
+            "Subscriptions": [
+              {
+                "Name": "test",
+                "Properties": {
+                  "DeadLetteringOnMessageExpiration": false,
+                  "DefaultMessageTimeToLive": "PT1H",
+                  "LockDuration": "PT1M",
+                  "MaxDeliveryCount": 10,
+                  "ForwardDeadLetteredMessagesTo": "",
+                  "ForwardTo": "",
+                  "RequiresSession": false
+                }
+              }
+            ]
+          },
+          {
+            "Name": "topic.2",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H",
+              "DuplicateDetectionHistoryTimeWindow": "PT20S",
+              "RequiresDuplicateDetection": false
+            },
+            "Subscriptions": [
+              {
+                "Name": "test",
+                "Properties": {
+                  "DeadLetteringOnMessageExpiration": false,
+                  "DefaultMessageTimeToLive": "PT1H",
+                  "LockDuration": "PT1M",
+                  "MaxDeliveryCount": 10,
+                  "ForwardDeadLetteredMessagesTo": "",
+                  "ForwardTo": "",
+                  "RequiresSession": false
+                }
+              }
+            ]
+          },
+          {
+            "Name": "gb.topic",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H",
+              "DuplicateDetectionHistoryTimeWindow": "PT20S",
+              "RequiresDuplicateDetection": false
+            },
+            "Subscriptions": [
+              {
+                "Name": "test",
+                "Properties": {
+                  "DeadLetteringOnMessageExpiration": false,
+                  "DefaultMessageTimeToLive": "PT1H",
+                  "LockDuration": "PT1M",
+                  "MaxDeliveryCount": 10,
+                  "ForwardDeadLetteredMessagesTo": "",
+                  "ForwardTo": "",
+                  "RequiresSession": false
+                }
+              }
+            ]
+          },
+          {
+            "Name": "ie.topic",
+            "Properties": {
+              "DefaultMessageTimeToLive": "PT1H",
+              "DuplicateDetectionHistoryTimeWindow": "PT20S",
+              "RequiresDuplicateDetection": false
+            },
+            "Subscriptions": [
+              {
+                "Name": "test",
+                "Properties": {
+                  "DeadLetteringOnMessageExpiration": false,
+                  "DefaultMessageTimeToLive": "PT1H",
+                  "LockDuration": "PT1M",
+                  "MaxDeliveryCount": 10,
+                  "ForwardDeadLetteredMessagesTo": "",
+                  "ForwardTo": "",
+                  "RequiresSession": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "Logging": {
+      "Type": "Console"
     }
+  }
 }

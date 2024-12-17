@@ -1,53 +1,53 @@
 {
-    "$schema": "http://json-schema.org/draft-04/schema#",
-    "dependencies": {
-        "jmespath": {
-            "oneOf": [
-                {
-                    "required": [
-                        "regexp"
-                    ]
-                },
-                {
-                    "not": {
-                        "required": [
-                            "regexp"
-                        ]
-                    }
-                }
+  "$schema": "http://json-schema.org/draft-04/schema#",
+  "dependencies": {
+    "jmespath": {
+      "oneOf": [
+        {
+          "required": [
+            "regexp"
+          ]
+        },
+        {
+          "not": {
+            "required": [
+              "regexp"
             ]
+          }
         }
+      ]
+    }
+  },
+  "properties": {
+    "destination_namespaces": {
+      "description": "The namespaces (comma separated) to which data will be sent."
     },
-    "properties": {
-        "destination_namespaces": {
-            "description": "The namespaces (comma separated) to which data will be sent."
-        },
-        "destination_topics": {
-            "description": "The topics (comma separated) to which data will be sent.",
-            "type": "string"
-        },
-        "jmespath": {
-            "description": "A JMESPath expression used for querying data.",
-            "type": "string"
-        },
-        "regexp": {
-            "description": "A regular expression pattern for matching data.",
-            "type": "string"
-        },
-        "source_subscription": {
-            "description": "The subscription from which data will be retrieved.",
-            "type": "string"
-        },
-        "source_topic": {
-            "description": "The topic from which data will be retrieved.",
-            "type": "string"
-        }
+    "destination_topics": {
+      "description": "The topics (comma separated) to which data will be sent.",
+      "type": "string"
     },
-    "required": [
-        "destination_namespaces",
-        "destination_topics",
-        "source_subscription",
-        "source_topic"
-    ],
-    "type": "object"
+    "jmespath": {
+      "description": "A JMESPath expression used for querying data.",
+      "type": "string"
+    },
+    "regexp": {
+      "description": "A regular expression pattern for matching data.",
+      "type": "string"
+    },
+    "source_subscription": {
+      "description": "The subscription from which data will be retrieved.",
+      "type": "string"
+    },
+    "source_topic": {
+      "description": "The topic from which data will be retrieved.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "destination_namespaces",
+    "destination_topics",
+    "source_subscription",
+    "source_topic"
+  ],
+  "type": "object"
 }
