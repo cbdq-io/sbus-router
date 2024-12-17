@@ -38,6 +38,7 @@ import logging
 import os
 import re
 import sys
+from string import Template
 from urllib.parse import urlparse
 
 import jmespath
@@ -566,7 +567,8 @@ class EnvironmentConfigParser:
 
         for item in self.get_prefixed_values('ROUTER_RULE_'):
             name = item[0].replace('ROUTER_RULE_', '')
-            definition = item[1]
+            template = Template(item[1])
+            definition = template.safe_substitute(os.environ)
             response.append(RouterRule(name, definition))
 
         return response
