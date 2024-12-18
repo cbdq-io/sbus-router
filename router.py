@@ -529,7 +529,7 @@ class EnvironmentConfigParser:
         str
             The name of the DLQ topic.
         """
-        return os.environ['ROUTER_DLQ_TOPIC']
+        return self._environ['ROUTER_DLQ_TOPIC']
 
     def get_prefixed_values(self, prefix: str) -> list:
         """
@@ -582,7 +582,7 @@ class EnvironmentConfigParser:
         str
             A URL suitable for AMQP connection.
         """
-        connection_string = os.environ['ROUTER_SOURCE_CONNECTION_STRING']
+        connection_string = self._environ['ROUTER_SOURCE_CONNECTION_STRING']
         helper = ConnectionStringHelper(connection_string)
         return helper.amqp_url()
 
