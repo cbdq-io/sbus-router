@@ -779,7 +779,10 @@ class Router(MessagingHandler):
                     logger.error(f'Failed to forward message: {e}')
                     return 1
 
-        logger.warning(f'No rules matched for message: {message.body}')
+        logger.warning('Message sent to the DLQ.')
+        message.properties = {
+            'source_topic': source_topic
+        }
         message.send(self.senders['DLQ'])
         return 2
 
