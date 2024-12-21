@@ -681,6 +681,27 @@ class Router(MessagingHandler):
             sender.send(message)
             logger.debug(f'Message sent to {destination_topic} in namespace {namespace_name}.')
 
+    def handle_dlq_message(self, message: Message, source_topic_name: str) -> None:
+        """
+        Send a message to the DLQ.
+
+        Parameters
+        ----------
+        message : proton.Message
+            The message that needs to be sent to the DLQ.
+        source_topic_name : str
+            The name of the DLQ topic.
+        """
+        properties = message.properties
+
+        if properties is None:
+            properties = {}
+
+        properties['source_topic'] = source_topic_name
+        message.properties = properties
+        message.send(self.senders['DLQ'])
+        logger.warning('Message sent to the DLQ.')
+
     def on_message(self, event):
         """Handle a message event."""
         message = event.message
@@ -779,8 +800,7 @@ class Router(MessagingHandler):
                     logger.error(f'Failed to forward message: {e}')
                     return 1
 
-        logger.warning(f'No rules matched for message: {message.body}')
-        message.send(self.senders['DLQ'])
+        self.handle_dlq_message(message, source_topic)
         return 2
 
 

@@ -60,6 +60,39 @@ def _(aqmp_url: str, input_topic: str, output_topic: str, message_body: str):
         pytest.skip(f'Output topic is "{output_topic}".')
 
 
+def is_message_valid(message: Message, expected_body: str, topic_name: str) -> bool:
+    """
+    Check the validity of the received message.
+
+    Parameters
+    ----------
+    message : proton.Message
+        The message to be validated.
+    expected_body : str
+        The message body that is expected to be recieved.
+    topic_name : str
+        The name of the topic that the message was received from.
+
+    Returns
+    -------
+    bool
+        True if the message is as expected, false otherwise.
+    """
+    response = True
+
+    if topic_name == 'dlq':
+        if 'source_topic' not in message.properties:
+            logger.error('No "source_topic" properties in DLQ message.')
+            response = False
+
+    if message.body != expected_body:
+        logger.error(f'Expected message "{expected_body}".')
+        logger.error(f'Actual message "{message.body}".')
+        response = False
+
+    return response
+
+
 @then('the expected output message is received')
 def _(aqmp_url: str, input_topic: str, output_topic: str, message_body: str):
     """The expected output message is received."""
@@ -76,15 +109,14 @@ def _(aqmp_url: str, input_topic: str, output_topic: str, message_body: str):
     for attempt in range(10):  # Retry receiving for up to 10 seconds
         try:
             logger.debug(f'Attempt {attempt + 1} to receive message from "{output_topic}".')
-            received_message = receiver.receive(timeout=1).body
-            logger.debug(f'Message received: "{received_message}" at {time.time()}.')
+            message = receiver.receive(timeout=1)
+            logger.debug(f'Message received: "{message.body}" at {time.time()}.')
             receiver.accept()
             break
         except Timeout as e:
             logger.warning(f'Receive attempt {attempt + 1} timed out: {e}')
-            received_message = None
     else:
         pytest.fail(f'Message not received within the retry limit from "{output_topic}".')
 
     conn.close()
-    assert received_message == message_body
+    assert is_message_valid(message, message_body, output_topic)
