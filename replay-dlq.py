@@ -170,7 +170,7 @@ class DLQReplayHandler(MessagingHandler):
 
         if hash in self.message_hashes:
             self.logger.warning('A message with the same hash has already been processed.')
-            delivery.update(Disposition.ACCEPTED)
+            delivery.update(Disposition.REJECTED)
             return
 
         # Extract the source topic
@@ -209,7 +209,7 @@ class DLQReplayHandler(MessagingHandler):
     def on_timer_task(self, event):
         """Check for timeout on consuming from the DLQ."""
         if event.reactor.now - self.last_message_time > self.timeout:
-            self.logger.info(f'Timeout ({self.timeout}s) reached with no messages. Stopping container.')
+            self.logger.info(f'Timeout ({self.timeout}s) reached with no messages.')
             self.reactor.stop()
         else:
             # Reschedule the timer task
