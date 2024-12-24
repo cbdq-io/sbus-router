@@ -3,11 +3,13 @@ import logging
 import time
 
 import pytest
+import testinfra
 from proton import Message
 from proton._exceptions import Timeout
 from proton.utils import BlockingConnection
 from pytest_bdd import given, parsers, scenario, then, when
 
+from replay_dlq import Container, DLQReplayHandler, RuntimeParams
 from router import ConnectionStringHelper, get_logger
 
 logger = get_logger(__name__, logging.DEBUG)
@@ -16,6 +18,11 @@ logger = get_logger(__name__, logging.DEBUG)
 @scenario('data-flow.feature', 'Inject a Message and Confirm the Destination')
 def test_inject_a_message_and_confirm_the_destination():
     """Inject a Message and Confirm the Destination."""
+
+
+@scenario('data-flow.feature', 'Replay DLQ Message')
+def test_replay_dlq_message():
+    """Replay DLQ Message."""
 
 
 @given(parsers.parse('the input topic is {input_topic}'), target_fixture='input_topic')
@@ -50,6 +57,25 @@ def _(output_topic: str):
     return output_topic
 
 
+@when('the DLQ messags are replayed')
+def _(aqmp_url: str):
+    """the DLQ messags are replayed."""
+    runtime = RuntimeParams(
+        [
+            '--connection-string', aqmp_url,
+            '--name', 'dlq',
+            '--subscription', 'dlq_replay'
+        ]
+    )
+    replayer = DLQReplayHandler(
+        f'{runtime.dlq_topic_name}/Subscriptions/{runtime.subscription}',
+        aqmp_url,
+        5,
+        logger
+    )
+    Container(replayer).run()
+
+
 @when('the input message is sent')
 def _(aqmp_url: str, input_topic: str, output_topic: str, message_body: str):
     """the input message is sent."""
@@ -58,6 +84,14 @@ def _(aqmp_url: str, input_topic: str, output_topic: str, message_body: str):
         sender = conn.create_sender(input_topic)
         sender.send(Message(body=message_body))
         pytest.skip(f'Output topic is "{output_topic}".')
+
+
+@then('the DLQ count is 2')
+def _():
+    """the DLQ count is 2."""
+    host = testinfra.get_host('docker://router')
+    cmd = host.run('curl localhost:8000')
+    assert 'dlq_message_count_total 2.0' in cmd.stdout
 
 
 def is_message_valid(message: Message, expected_body: str, topic_name: str) -> bool:
