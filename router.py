@@ -38,15 +38,20 @@ import logging
 import os
 import re
 import sys
+from string import Template
 from urllib.parse import urlparse
 
 import jmespath
 import jsonschema
 import jsonschema.exceptions
 from azure.core.utils import parse_connection_string
+from prometheus_client import Counter, Summary, start_http_server
 from proton import Message
 from proton.handlers import MessagingHandler
 from proton.reactor import Container
+
+PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
+DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
 
 def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> logging.Logger:
@@ -73,7 +78,7 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
 
 logging.basicConfig()
 logger = get_logger(__file__)
-__version__ = '0.1.0'
+__version__ = '0.2.0'
 
 
 class ConnectionStringHelper:
@@ -528,7 +533,7 @@ class EnvironmentConfigParser:
         str
             The name of the DLQ topic.
         """
-        return os.environ['ROUTER_DLQ_TOPIC']
+        return self._environ['ROUTER_DLQ_TOPIC']
 
     def get_prefixed_values(self, prefix: str) -> list:
         """
@@ -553,6 +558,20 @@ class EnvironmentConfigParser:
 
         return response
 
+    def get_prometheus_port(self) -> int:
+        """
+        Get the prometheus port.
+
+        If no port is specified, default to 8000.
+
+        Returns
+        -------
+        int
+            The port to be used with Prometheus.
+        """
+        port = self._environ.get('ROUTER_PROMETHEUS_PORT', '8000')
+        return int(port)
+
     def get_rules(self) -> list[RouterRule]:
         """
         Extract a list of routing rules from the environment.
@@ -566,7 +585,8 @@ class EnvironmentConfigParser:
 
         for item in self.get_prefixed_values('ROUTER_RULE_'):
             name = item[0].replace('ROUTER_RULE_', '')
-            definition = item[1]
+            template = Template(item[1])
+            definition = template.safe_substitute(os.environ)
             response.append(RouterRule(name, definition))
 
         return response
@@ -580,7 +600,7 @@ class EnvironmentConfigParser:
         str
             A URL suitable for AMQP connection.
         """
-        connection_string = os.environ['ROUTER_SOURCE_CONNECTION_STRING']
+        connection_string = self._environ['ROUTER_SOURCE_CONNECTION_STRING']
         helper = ConnectionStringHelper(connection_string)
         return helper.amqp_url()
 
@@ -658,6 +678,7 @@ class Router(MessagingHandler):
         self.sources = []
         self.source_namespace_url = config.get_source_url()
         self.parse_config_data()
+        start_http_server(config.get_prometheus_port())
 
     def forward_message(self, message: Message, destination_namespaces: list, destination_topics: list):
         """
@@ -678,6 +699,28 @@ class Router(MessagingHandler):
             sender = self.senders[sender_name]
             sender.send(message)
             logger.debug(f'Message sent to {destination_topic} in namespace {namespace_name}.')
+
+    def handle_dlq_message(self, message: Message, source_topic_name: str) -> None:
+        """
+        Send a message to the DLQ.
+
+        Parameters
+        ----------
+        message : proton.Message
+            The message that needs to be sent to the DLQ.
+        source_topic_name : str
+            The name of the DLQ topic.
+        """
+        properties = message.properties
+
+        if properties is None:
+            properties = {}
+
+        properties['source_topic'] = source_topic_name
+        message.properties = properties
+        message.send(self.senders['DLQ'])
+        logger.warning('Message sent to the DLQ.')
+        DLQ_COUNT.inc()
 
     def on_message(self, event):
         """Handle a message event."""
@@ -744,6 +787,7 @@ class Router(MessagingHandler):
 
         self.sources = list(set(sources))
 
+    @PROCESSING_TIME.time()
     def process_message(self, source_topic: str, message: Message) -> int:
         """
         Process the received message asynchronously.
@@ -777,8 +821,7 @@ class Router(MessagingHandler):
                     logger.error(f'Failed to forward message: {e}')
                     return 1
 
-        logger.warning(f'No rules matched for message: {message.body}')
-        message.send(self.senders['DLQ'])
+        self.handle_dlq_message(message, source_topic)
         return 2
 
 

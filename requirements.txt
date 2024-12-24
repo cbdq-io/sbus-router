@@ -1,4 +1,5 @@
 azure-core
 jmespath
 jsonschema
+prometheus-client
 python-qpid-proton

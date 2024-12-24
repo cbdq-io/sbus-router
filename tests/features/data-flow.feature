@@ -19,3 +19,8 @@ Scenario Outline: Inject a Message and Confirm the Destination
         | input-4.json    | topic.2       | ie.topic     |
         | input-5.json    | topic.1       | N/A          |
         | input-6.json    | topic.2       | dlq          |
+
+Scenario: Replay DLQ Message
+    Given the landing Service Bus Emulator
+    When the DLQ messags are replayed
+    Then the DLQ count is 2
