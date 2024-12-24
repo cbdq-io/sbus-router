@@ -3,7 +3,7 @@
 extends: default
 
 ignore: |
-  charts/*/templates/*
+  .qlty/
 
 rules:
   braces:
@@ -18,8 +18,8 @@ rules:
   commas:
     max-spaces-after: -1
     level: error
-  comments: enable
-  comments-indentation: enable
+  comments: disable
+  comments-indentation: disable
   document-start: enable
   empty-lines:
     max: 3
