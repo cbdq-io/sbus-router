@@ -53,6 +53,9 @@ def _(method_name: str, expected_value: str, environ: dict):
     elif method_name == 'get_source_url':
         actual_value = widget.get_source_url()
         expected_value = 'amqps://RootManageSharedAccessKey:SAS_KEY_VALUE@localhost:5671'
+    elif method_name == 'get_prometheus_port':
+        expected_value = int(expected_value)
+        actual_value = widget.get_prometheus_port()
     else:
         raise NotImplementedError(f'No method name "{method_name}".')
 

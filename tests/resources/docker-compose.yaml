@@ -35,6 +35,8 @@ services:
       ROUTER_RULE_IE_TELNO: '{"destination_namespaces":"IE","destination_topics":"ie.topic","jmespath":"details[?telephone_number].telephone_number","regexp":"^\\+353","source_subscription":"test","source_topic":"topic.2"}'
       ROUTER_SOURCE_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
     image: router:latest
+    ports:
+      - "8000:8000"
 
   sqledge:
     container_name: "sqledge"

@@ -45,9 +45,13 @@ import jmespath
 import jsonschema
 import jsonschema.exceptions
 from azure.core.utils import parse_connection_string
+from prometheus_client import Counter, Summary, start_http_server
 from proton import Message
 from proton.handlers import MessagingHandler
 from proton.reactor import Container
+
+PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
+DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
 
 def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> logging.Logger:
@@ -554,6 +558,20 @@ class EnvironmentConfigParser:
 
         return response
 
+    def get_prometheus_port(self) -> int:
+        """
+        Get the prometheus port.
+
+        If no port is specified, default to 8000.
+
+        Returns
+        -------
+        int
+            The port to be used with Prometheus.
+        """
+        port = self._environ.get('ROUTER_PROMETHEUS_PORT', '8000')
+        return int(port)
+
     def get_rules(self) -> list[RouterRule]:
         """
         Extract a list of routing rules from the environment.
@@ -660,6 +678,7 @@ class Router(MessagingHandler):
         self.sources = []
         self.source_namespace_url = config.get_source_url()
         self.parse_config_data()
+        start_http_server(config.get_prometheus_port())
 
     def forward_message(self, message: Message, destination_namespaces: list, destination_topics: list):
         """
@@ -701,6 +720,7 @@ class Router(MessagingHandler):
         message.properties = properties
         message.send(self.senders['DLQ'])
         logger.warning('Message sent to the DLQ.')
+        DLQ_COUNT.inc()
 
     def on_message(self, event):
         """Handle a message event."""
@@ -767,6 +787,7 @@ class Router(MessagingHandler):
 
         self.sources = list(set(sources))
 
+    @PROCESSING_TIME.time()
     def process_message(self, source_topic: str, message: Message) -> int:
         """
         Process the received message asynchronously.

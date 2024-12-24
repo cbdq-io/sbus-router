@@ -21,4 +21,5 @@ Feature: Environment Configuration Parser
         Examples:
             | key                             | value                                                                                                | method_name           |
             | ROUTER_DLQ_TOPIC                | DLQ                                                                                                  | get_dead_letter_queue |
+            | ROUTER_PROMETHEUS_PORT          | 8042                                                                                                 | get_prometheus_port   |
             | ROUTER_SOURCE_CONNECTION_STRING | Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE; | get_source_url        |

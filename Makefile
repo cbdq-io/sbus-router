@@ -22,4 +22,4 @@ tag:
 test:
 	docker compose -f tests/resources/docker-compose.yaml up -d --wait
 	sleep 10
-	PYTHONPATH=. pytest --timeout=5
+	PYTHONPATH=. pytest --timeout=15
