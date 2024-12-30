@@ -33,6 +33,7 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
+import itertools
 import json
 import logging
 import os
@@ -311,6 +312,9 @@ class RouterRule:
         """
         if isinstance(message, str):
             return message
+        elif isinstance(message, memoryview):
+            message = message.tobytes()
+
         return message.decode('utf-8')
 
     def get_data(self, message: object) -> list:
@@ -344,7 +348,7 @@ class RouterRule:
         result = jmespath.search(self.jmespath, message)
 
         if isinstance(result, list):
-            return result
+            return list(itertools.chain.from_iterable(result))
         elif result is None:
             return []
 
@@ -740,7 +744,7 @@ class Router(MessagingHandler):
         for url in self.connections.keys():
             hostname = urlparse(url).hostname
             logger.debug(f'Creating a connection for {hostname}...')
-            connection = event.container.connect(url)
+            connection = event.container.connect(url, allowed_mechs='PLAIN')
             self.connections[url] = connection
             logger.info(f'Successfully created a connection for {hostname}.')
 
