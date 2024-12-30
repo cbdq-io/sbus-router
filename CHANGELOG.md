@@ -1,6 +1,13 @@
 # Changelog
 
 
+## 0.2.0
+
+### Fix
+
+* Changes to ensure connection to Azure Service Bus. [Ben Dalling]
+
+
 ## 0.2.0 (2024-12-24)
 
 ### New
