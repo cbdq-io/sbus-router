@@ -33,7 +33,6 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
-import itertools
 import json
 import logging
 import os
@@ -317,6 +316,28 @@ class RouterRule:
 
         return message.decode('utf-8')
 
+    def flatten_list(self, data: list) -> list:
+        """
+        Flatten a possibly deeply nested list.
+
+        Parameters
+        ----------
+        data : list
+            The list to be flattened.
+
+        Returns
+        -------
+        list
+            A flattened list.
+        """
+        flat_list = []
+        for item in data:
+            if isinstance(item, list):  # Check if the item is a list
+                flat_list.extend(self.flatten_list(item))  # Recursively flatten it
+            else:
+                flat_list.append(item)  # Otherwise, add the item to the flat list
+        return flat_list
+
     def get_data(self, message: object) -> list:
         """
         Get the data required from the message to do a comparison.
@@ -348,8 +369,12 @@ class RouterRule:
         result = jmespath.search(self.jmespath, message)
 
         if isinstance(result, list):
-            return list(itertools.chain.from_iterable(result))
+            logger.debug(f'List result is "{result}".')
+            result = self.flatten_list(result)
+            logger.debug(f'Converted result to "{result}".')
+            return result
         elif result is None:
+            logger.debug(f'No match for JMESPath "{self.jmespath}" in "{message}".')
             return []
 
         return [result]
@@ -369,7 +394,6 @@ class RouterRule:
             Does the data match.
         """
         data = self.get_data(message)
-        print(f'data is "{data}".')
         prog = re.compile(self.regexp)
 
         if data and any(prog.search(element) for element in data):
@@ -394,7 +418,7 @@ class RouterRule:
             A tuple containing if the rule is a match to the message, the
             destination namespaces(s) and the destination topics(s).
         """
-        print(f'{source_topic_name}:{self.source_topic}')
+        logger.debug(f'Checking message against rule {self.name()}...')
         if source_topic_name == self.source_topic:
             if not self.regexp:
                 return True, self.destination_namespaces, self.destination_topics
@@ -402,6 +426,7 @@ class RouterRule:
                 return True, self.destination_namespaces, self.destination_topics
 
         # If we got here, it ain't a match.
+        logger.debug(f'Rule {self.name()} does not match against the message.')
         return (False, None, None)
 
     def name(self, name: str = None) -> str:
