@@ -78,7 +78,7 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
 
 logging.basicConfig()
 logger = get_logger(__file__)
-__version__ = '0.2.0'
+__version__ = '0.2.1'
 
 
 class ConnectionStringHelper:
@@ -311,7 +311,32 @@ class RouterRule:
         """
         if isinstance(message, str):
             return message
+        elif isinstance(message, memoryview):
+            message = message.tobytes()
+
         return message.decode('utf-8')
+
+    def flatten_list(self, data: list) -> list:
+        """
+        Flatten a possibly deeply nested list.
+
+        Parameters
+        ----------
+        data : list
+            The list to be flattened.
+
+        Returns
+        -------
+        list
+            A flattened list.
+        """
+        flat_list = []
+        for item in data:
+            if isinstance(item, list):  # Check if the item is a list
+                flat_list.extend(self.flatten_list(item))  # Recursively flatten it
+            else:
+                flat_list.append(item)  # Otherwise, add the item to the flat list
+        return flat_list
 
     def get_data(self, message: object) -> list:
         """
@@ -344,8 +369,12 @@ class RouterRule:
         result = jmespath.search(self.jmespath, message)
 
         if isinstance(result, list):
+            logger.debug(f'List result is "{result}".')
+            result = self.flatten_list(result)
+            logger.debug(f'Converted result to "{result}".')
             return result
         elif result is None:
+            logger.debug(f'No match for JMESPath "{self.jmespath}" in "{message}".')
             return []
 
         return [result]
@@ -365,7 +394,6 @@ class RouterRule:
             Does the data match.
         """
         data = self.get_data(message)
-        print(f'data is "{data}".')
         prog = re.compile(self.regexp)
 
         if data and any(prog.search(element) for element in data):
@@ -390,7 +418,7 @@ class RouterRule:
             A tuple containing if the rule is a match to the message, the
             destination namespaces(s) and the destination topics(s).
         """
-        print(f'{source_topic_name}:{self.source_topic}')
+        logger.debug(f'Checking message against rule {self.name()}...')
         if source_topic_name == self.source_topic:
             if not self.regexp:
                 return True, self.destination_namespaces, self.destination_topics
@@ -398,6 +426,7 @@ class RouterRule:
                 return True, self.destination_namespaces, self.destination_topics
 
         # If we got here, it ain't a match.
+        logger.debug(f'Rule {self.name()} does not match against the message.')
         return (False, None, None)
 
     def name(self, name: str = None) -> str:
@@ -740,7 +769,7 @@ class Router(MessagingHandler):
         for url in self.connections.keys():
             hostname = urlparse(url).hostname
             logger.debug(f'Creating a connection for {hostname}...')
-            connection = event.container.connect(url)
+            connection = event.container.connect(url, allowed_mechs='PLAIN')
             self.connections[url] = connection
             logger.info(f'Successfully created a connection for {hostname}.')
 
