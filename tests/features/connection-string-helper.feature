@@ -9,9 +9,10 @@ Feature: Connection String Helper
     Then the AMQP URL is <amqp_url>
 
     Examples:
-      | sbus_connection_string                                                                                                           | amqp_url                                                       |
-      | Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;                             | amqps://RootManageSharedAccessKey:SAS_KEY_VALUE@localhost:5671 |
-      | Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true; | amqp://RootManageSharedAccessKey:SAS_KEY_VALUE@localhost:5672  |
+      | sbus_connection_string                                                                                                           | amqp_url                                                        |
+      | Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;                             | amqps://RootManageSharedAccessKey:SAS_KEY_VALUE@localhost:5671  |
+      | Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE=;                            | amqps://RootManageSharedAccessKey:SAS_KEY_VALUE=@localhost:5671 |
+      | Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true; | amqp://RootManageSharedAccessKey:SAS_KEY_VALUE@localhost:5672   |
 
   Scenario Outline: Invalid Connection Strings
     Given Azure Service Bus Connection String <sbus_connection_string>
