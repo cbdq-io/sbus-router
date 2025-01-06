@@ -1,6 +1,6 @@
 .EXPORT_ALL_VARIABLES:
 
-TAG = 0.2.1
+TAG = $$( python -c 'import router; print(router.__version__)' )
 
 all: lint build clean test
 
