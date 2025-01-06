@@ -118,7 +118,7 @@ class DLQReplayHandler(MessagingHandler):
         How long to wait for messages to arrive before exiting.
     """
 
-    def __init__(self, dlq_topic_name, connection, timeout, logger: logging.Logger):
+    def __init__(self, dlq_topic_name, connection: ConnectionStringHelper, timeout, logger: logging.Logger):
         super().__init__()
         self.dlq_topic_name = dlq_topic_name
         self.connection = connection
@@ -153,8 +153,13 @@ class DLQReplayHandler(MessagingHandler):
     def on_start(self, event):
         """Execute a start event."""
         self.reactor = event.reactor
-        self.logger.debug(f'Creating a connection for "{self.connection}".')
-        self.conn = event.container.connect(self.connection)
+        self.logger.debug(f'Creating a connection for "{self.connection.netloc()}".')
+        self.conn = event.container.connect(
+            url=self.connection.netloc(),
+            allowed_mechs='PLAIN',
+            password=self.connection.key_value(),
+            user=self.connection.key_name()
+        )
         self.logger.debug(f'Creating a receiver for "{self.dlq_topic_name}...".')
         self.receiver = event.container.create_receiver(self.conn, source=self.dlq_topic_name)
         self.logger.debug(f'Receiver for "{self.dlq_topic_name}" created successfully.')
@@ -227,7 +232,7 @@ if __name__ == '__main__':
     helper = ConnectionStringHelper(runtime.connection_string)
     replayer = DLQReplayHandler(
         f'{runtime.dlq_topic_name}/Subscriptions/{runtime.subscription}',
-        helper.amqp_url(),
+        helper,
         runtime.timeout,
         runtime.logger
     )
