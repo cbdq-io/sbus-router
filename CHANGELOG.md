@@ -1,7 +1,7 @@
 # Changelog
 
 
-## $( python -c 'import router; print(router.__version__)' )
+## 
 
 ### Fix
 
