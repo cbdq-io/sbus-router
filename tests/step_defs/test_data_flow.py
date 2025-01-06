@@ -31,13 +31,13 @@ def _(input_topic: str):
     return input_topic
 
 
-@given('the landing Service Bus Emulator', target_fixture='aqmp_url')
+@given('the landing Service Bus Emulator', target_fixture='connection_details')
 def _():
     """the landing Service Bus Emulator."""
     conn_str = 'Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;'
     conn_str += 'SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;'
     conn_str = ConnectionStringHelper(conn_str)
-    return conn_str.amqp_url()
+    return conn_str
 
 
 @given(parsers.parse('the message contents is {input_data_file}'), target_fixture='message_body')
@@ -58,18 +58,18 @@ def _(output_topic: str):
 
 
 @when('the DLQ messags are replayed')
-def _(aqmp_url: str):
+def _(connection_details: ConnectionStringHelper):
     """the DLQ messags are replayed."""
     runtime = RuntimeParams(
         [
-            '--connection-string', aqmp_url,
+            '--connection-string', connection_details.sbus_connection_string,
             '--name', 'dlq',
             '--subscription', 'dlq_replay'
         ]
     )
     replayer = DLQReplayHandler(
         f'{runtime.dlq_topic_name}/Subscriptions/{runtime.subscription}',
-        aqmp_url,
+        connection_details,
         5,
         logger
     )
@@ -77,10 +77,10 @@ def _(aqmp_url: str):
 
 
 @when('the input message is sent')
-def _(aqmp_url: str, input_topic: str, output_topic: str, message_body: str):
+def _(connection_details: ConnectionStringHelper, input_topic: str, output_topic: str, message_body: str):
     """the input message is sent."""
     if output_topic == 'N/A':
-        conn = BlockingConnection(aqmp_url)
+        conn = BlockingConnection(connection_details.amqp_url())
         sender = conn.create_sender(input_topic)
         sender.send(Message(body=message_body))
         pytest.skip(f'Output topic is "{output_topic}".')
@@ -128,9 +128,9 @@ def is_message_valid(message: Message, expected_body: str, topic_name: str) -> b
 
 
 @then('the expected output message is received')
-def _(aqmp_url: str, input_topic: str, output_topic: str, message_body: str):
+def _(connection_details: ConnectionStringHelper, input_topic: str, output_topic: str, message_body: str):
     """The expected output message is received."""
-    conn = BlockingConnection(aqmp_url)
+    conn = BlockingConnection(connection_details.amqp_url())
     receiver = conn.create_receiver(f'{output_topic}/Subscriptions/test')
     logger.debug(f'Receiver for "{output_topic}" created at {time.time()}.')
 

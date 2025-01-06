@@ -1,3 +1,4 @@
+@unit
 Feature: Environment Configuration Parser
 
     Test that we can correctly extract configuration from

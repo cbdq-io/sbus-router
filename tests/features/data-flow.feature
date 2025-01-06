@@ -1,3 +1,4 @@
+@system
 Feature: Data Flow
     In order to confirm rules
     As a Service Bus Router

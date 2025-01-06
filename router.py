@@ -101,6 +101,7 @@ class ConnectionStringHelper:
         self.port(5671)
         self.protocol('amqps')
         self.parse()
+        self.netloc(f'{self.protocol()}://{self.hostname()}:{self.port()}')
         url = f'{self.protocol()}://{self.key_name()}:{self.key_value()}'
         url += f'@{self.hostname()}:{self.port()}'
         self.amqp_url(url)
@@ -176,6 +177,25 @@ class ConnectionStringHelper:
         if key_value is not None:
             self._key_value = key_value
         return self._key_value
+
+    def netloc(self, netloc: str = None) -> str:
+        """
+        Get or set the netloc.
+
+        Parameters
+        ----------
+        netloc : str, optional
+            The value to set.
+
+        Returns
+        -------
+        str
+            The currently set value.
+        """
+        if netloc is not None:
+            self._netloc = netloc
+
+        return self._netloc
 
     def parse(self) -> None:
         """
@@ -502,8 +522,7 @@ class ServiceBusNamespaces:
         connection_string : str
             The connection string for connecting to the namespace.
         """
-        helper = ConnectionStringHelper(connection_string)
-        self._namespaces[name] = helper.amqp_url()
+        self._namespaces[name] = connection_string
 
     def count(self) -> int:
         """
@@ -536,8 +555,7 @@ class ServiceBusNamespaces:
         ValueError
             If the provided name is not known.
         """
-        conn_str = self._namespaces[name]
-        return conn_str
+        return self._namespaces[name]
 
 
 class EnvironmentConfigParser:
@@ -619,6 +637,10 @@ class EnvironmentConfigParser:
             response.append(RouterRule(name, definition))
 
         return response
+
+    def get_source_connection_string(self) -> str:
+        """Get the connection string of the source namespace."""
+        return self._environ['ROUTER_SOURCE_CONNECTION_STRING']
 
     def get_source_url(self) -> str:
         """
@@ -705,7 +727,7 @@ class Router(MessagingHandler):
         self.rules = config.get_rules()
         self.senders = {}
         self.sources = []
-        self.source_namespace_url = config.get_source_url()
+        self.source_namespace_connection_string = config.get_source_connection_string()
         self.parse_config_data()
         start_http_server(config.get_prometheus_port())
 
@@ -766,14 +788,20 @@ class Router(MessagingHandler):
         """Respond to a start event."""
         logger.debug('Start event.')
 
-        for url in self.connections.keys():
-            hostname = urlparse(url).hostname
+        for connection_string in self.connections.keys():
+            connection_details = ConnectionStringHelper(connection_string)
+            hostname = connection_details.netloc()
             logger.debug(f'Creating a connection for {hostname}...')
-            connection = event.container.connect(url, allowed_mechs='PLAIN')
-            self.connections[url] = connection
+            connection = event.container.connect(
+                url=connection_details.netloc(),
+                allowed_mechs='PLAIN',
+                password=connection_details.key_value(),
+                user=connection_details.key_name()
+            )
+            self.connections[connection_string] = connection
             logger.info(f'Successfully created a connection for {hostname}.')
 
-        connection = self.connections[self.source_namespace_url]
+        connection = self.connections[self.source_namespace_connection_string]
 
         for source in self.sources:
             logger.debug(f'Creating a receiver for "{source}".')
@@ -793,7 +821,7 @@ class Router(MessagingHandler):
 
     def parse_config_data(self) -> dict:
         """Create a dict of connections with the URL as a key."""
-        url_list = [self.source_namespace_url]
+        url_list = [self.source_namespace_connection_string]
         service_bus_namespaces = self.config.service_bus_namespaces()
         sources = []
 
