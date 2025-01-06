@@ -148,7 +148,7 @@ class DLQReplayHandler(MessagingHandler):
         if type(body) is str:
             body = body.encode()
 
-        return hashlib.md5(body).hexdigest()
+        return hashlib.md5(body, usedforsecurity=False).hexdigest()
 
     def on_start(self, event):
         """Execute a start event."""
