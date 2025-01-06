@@ -78,7 +78,7 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
 
 logging.basicConfig()
 logger = get_logger(__file__)
-__version__ = '0.2.1'
+__version__ = '0.2.2'
 
 
 class ConnectionStringHelper:
