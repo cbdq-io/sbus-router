@@ -28,7 +28,7 @@ jobs:
           python-version: 3.12
 
       - name: Install Python Requirements
-        run: pip install gitchangelog pystache
+        run: pip install -r requirements.txt gitchangelog pystache
 
       - name: Update Change Log
         run: git pull && make changelog

@@ -1,3 +1,4 @@
+@unit
 Feature: Router Rule
     In order to route a message
     As a Router

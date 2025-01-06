@@ -1,7 +1,16 @@
 # Changelog
 
 
-## 0.2.1
+## 0.2.2
+
+### Fix
+
+* Handle non-URL compatible characters in namespace connection strings. [Ben Dalling]
+
+* Stop false negative security alert. [Ben Dalling]
+
+
+## 0.2.1 (2024-12-31)
 
 ### Fix
 

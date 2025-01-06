@@ -28,6 +28,27 @@ def _():
     pass
 
 
+@then(parsers.parse('key_name is {expected_key_name}'))
+def _(expected_key_name: str, sbus_connection_string: str):
+    """key_name is <key_name>."""
+    widget = ConnectionStringHelper(sbus_connection_string)
+    assert widget.key_name() == expected_key_name
+
+
+@then(parsers.parse('key_value is {expected_key_value}'))
+def _(expected_key_value: str, sbus_connection_string: str):
+    """key_value is <key_value>."""
+    widget = ConnectionStringHelper(sbus_connection_string)
+    assert expected_key_value == widget.key_value()
+
+
+@then(parsers.parse('netloc is {expected_netloc}'))
+def _(expected_netloc: str, sbus_connection_string: str):
+    """netloc is <netloc>."""
+    widget = ConnectionStringHelper(sbus_connection_string)
+    assert widget.netloc() == expected_netloc
+
+
 @then(parsers.parse('the AMQP URL is {expected_url}'))
 def _(expected_url: str, sbus_connection_string):
     """the AMQP URL is <amqp_url>."""

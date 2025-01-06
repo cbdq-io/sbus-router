@@ -165,5 +165,6 @@ cython_debug/
 .python-version
 
 .qlty/*
+!.qlty/qlty.toml
 !.qlty/configs/
 !.qlty/configs/**

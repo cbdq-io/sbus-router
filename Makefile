@@ -1,6 +1,6 @@
 .EXPORT_ALL_VARIABLES:
 
-TAG = 0.2.1
+TAG = $$( python -c 'import router; print(router.__version__)' )
 
 all: lint build clean test
 
@@ -8,7 +8,7 @@ build:
 	docker compose -f tests/resources/docker-compose.yaml build
 
 changelog:
-	gitchangelog > CHANGELOG.md
+	TAG=$(TAG) gitchangelog > CHANGELOG.md
 
 clean:
 	docker compose -f tests/resources/docker-compose.yaml down -t 0
