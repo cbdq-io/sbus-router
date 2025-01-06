@@ -1,7 +1,7 @@
 # Changelog
 
 
-## $( python -c 'import router; print(router.__version__)' )
+## 0.2.2 (2025-01-06)
 
 ### Fix
 
