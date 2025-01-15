@@ -3,3 +3,10 @@ jmespath
 jsonschema
 prometheus-client
 python-qpid-proton
+
+# To install uamqp on a Mac running on ARM, use:
+#
+#   CFLAGS="-Wno-error=incompatible-function-pointer-types" pip3 install uamqp
+#
+# As a workaround for https://github.com/Azure/azure-uamqp-python/issues/386
+uamqp
