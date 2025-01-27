@@ -8,7 +8,7 @@ build:
 	docker compose -f tests/resources/docker-compose.yaml build
 
 changelog:
-	TAG=$(TAG) gitchangelog > CHANGELOG.md
+	gitchangelog > CHANGELOG.md
 
 clean:
 	docker compose -f tests/resources/docker-compose.yaml down -t 0
