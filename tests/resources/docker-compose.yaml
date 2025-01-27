@@ -49,9 +49,14 @@ services:
 
   sut:
     build: sut
+    command:
+      - "-c"
+      - "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
+      - "-f"
+      - "/usr/local/etc/Config.json"
     container_name: sut
     depends_on:
       emulator:
         condition: service_started
-    environment:
-      AQMP_URL: "amqp://RootManageSharedAccessKey:SAS_KEY_VALUE@emulator:5672"
+    volumes:
+      - "./sbus-landing-config.json:/usr/local/etc/Config.json"
