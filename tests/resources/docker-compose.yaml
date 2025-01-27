@@ -4,7 +4,7 @@ services:
     container_name: "emulator"
     depends_on:
       sqledge:
-        condition: service_started
+        condition: service_healthy
     environment:
       SQL_SERVER: sqledge
       MSSQL_SA_PASSWORD: "Secret123"
@@ -40,10 +40,12 @@ services:
 
   sqledge:
     container_name: "sqledge"
-    image: "mcr.microsoft.com/azure-sql-edge:latest"
     environment:
       ACCEPT_EULA: "Y"
       MSSQL_SA_PASSWORD: "Secret123"
+    healthcheck:
+      test: timeout 1 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/1433'
+    image: "mcr.microsoft.com/azure-sql-edge:latest"
 
   sut:
     build: sut
