@@ -849,7 +849,7 @@ class Router(MessagingHandler):
             logger.debug(f'Creating a connection for {hostname}...')
             connection = event.container.connect(
                 url=connection_details.netloc(),
-                allowed_mechs='PLAIN',
+                allowed_mechs=os.getenv('ROUTER_ALLOWED_SASL_MECHS'),
                 password=connection_details.key_value(),
                 user=connection_details.key_name()
             )

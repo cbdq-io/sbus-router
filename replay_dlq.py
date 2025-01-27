@@ -156,7 +156,7 @@ class DLQReplayHandler(MessagingHandler):
         self.logger.debug(f'Creating a connection for "{self.connection.netloc()}".')
         self.conn = event.container.connect(
             url=self.connection.netloc(),
-            allowed_mechs='PLAIN',
+            allowed_mechs=os.getenv('ROUTER_ALLOWED_SASL_MECHS'),
             password=self.connection.key_value(),
             user=self.connection.key_name()
         )
