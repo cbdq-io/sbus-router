@@ -1,6 +1,13 @@
 # Changelog
 
 
+## 0.2.3
+
+### Fix
+
+* Refactor logging. [Ben Dalling]
+
+
 ## 0.2.2 (2025-01-06)
 
 ### Fix
