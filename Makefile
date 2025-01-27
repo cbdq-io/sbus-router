@@ -8,7 +8,7 @@ build:
 	docker compose -f tests/resources/docker-compose.yaml build
 
 changelog:
-	TAG=$(TAG) gitchangelog > CHANGELOG.md
+	gitchangelog > CHANGELOG.md
 
 clean:
 	docker compose -f tests/resources/docker-compose.yaml down -t 0
@@ -24,5 +24,4 @@ tag:
 
 test:
 	docker compose -f tests/resources/docker-compose.yaml up -d --wait
-	sleep 10
 	PYTHONPATH=. pytest --timeout=15

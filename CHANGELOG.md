@@ -1,7 +1,14 @@
 # Changelog
 
 
-## 0.2.3
+## Unreleased
+
+### Features
+
+* Add the "ROUTER_ALLOWED_SASL_MECHS" environment variable. [Ben Dalling]
+
+
+## 0.2.3 (2025-01-27)
 
 ### Fix
 
@@ -40,9 +47,5 @@
 ### New
 
 * A basic prototype that routes messages according to configured rules. [Ben Dalling]
-
-### Other
-
-* Initial commit. [Ben Dalling]
 
 
