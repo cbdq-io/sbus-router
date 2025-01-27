@@ -41,8 +41,4 @@
 
 * A basic prototype that routes messages according to configured rules. [Ben Dalling]
 
-### Other
-
-* Initial commit. [Ben Dalling]
-
 
