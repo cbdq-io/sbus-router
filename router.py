@@ -78,7 +78,7 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
 
 logging.basicConfig()
 logger = get_logger(__file__)
-__version__ = '0.2.2'
+__version__ = '0.2.3'
 
 
 class ConnectionStringHelper:
@@ -770,13 +770,68 @@ class Router(MessagingHandler):
         properties['source_topic'] = source_topic_name
         message.properties = properties
         message.send(self.senders['DLQ'])
-        logger.warning('Message sent to the DLQ.')
+        logger.warning("Message from {source_topic_name} sent to the DLQ '{message.body}'.")
         DLQ_COUNT.inc()
+
+    def on_connection_closed(self, event):
+        """Catch an event."""
+        logger.info('Connection closed event.')
+        return super().on_connection_closed(event)
+
+    def on_connection_closing(self, event):
+        """Catch an event."""
+        logger.info('Connection closing event.')
+        return super().on_connection_closing(event)
+
+    def on_connection_error(self, event):
+        """Catch an event."""
+        logger.error('Connecion error event.')
+        return super().on_connection_error(event)
+
+    def on_unhandled(self, method, *args):
+        """Catch an event."""
+        logger.debug(f'An unhandled event has occurred "{method}" ({args})')
+        return super().on_unhandled(method, args)
+
+    def on_disconnected(self, event):
+        """Catch an event."""
+        logger.info('Disconnected event.')
+        return super().on_disconnected(event)
+
+    def on_link_closed(self, event):
+        """Catch an event."""
+        logger.info('Link closed event.')
+        return super().on_link_closed(event)
+
+    def on_link_closing(self, event):
+        """Catch an event."""
+        logger.info('Link closing event.')
+        return super().on_link_closing(event)
+
+    def on_link_error(self, event):
+        """Catch an event."""
+        logger.error('Link error event')
+        return super().on_link_error(event)
+
+    def on_session_closed(self, event):
+        """Catch an event."""
+        logger.info('Session closed event.')
+        return super().on_session_closed(event)
+
+    def on_session_closing(self, event):
+        """Catch an event."""
+        logger.info('Session closing event.')
+        return super().on_session_closing(event)
+
+    def on_session_error(self, event):
+        """Catch an event."""
+        logger.error('Session error event.')
+        return super().on_session_error(event)
 
     def on_message(self, event):
         """Handle a message event."""
         message = event.message
-        logger.debug(f'Message event "{message.body}" from {event.link.source.address}.')
+        logger.debug(f'Message event from {event.link.source.address}.')
         source_topic = event.link.source.address.split('/')[0]
         self.process_message(source_topic, message)
 
