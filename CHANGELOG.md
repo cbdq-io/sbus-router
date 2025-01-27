@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Features
+
+* Feat: Add the "ROUTER_ALLOWED_SASL_MECHS" environment variable. [Ben Dalling]
+
+
 ## 0.2.3 (2025-01-27)
 
 ### Fix
