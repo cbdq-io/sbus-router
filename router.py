@@ -78,7 +78,7 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
 
 logging.basicConfig()
 logger = get_logger(__file__)
-__version__ = '0.2.4'
+__version__ = '0.2.5'
 
 
 class ConnectionStringHelper:
@@ -725,6 +725,10 @@ class Router(MessagingHandler):
         self.dlq_topic = config.get_dead_letter_queue()
         self.namespaces = config.service_bus_namespaces()
         self.rules = config.get_rules()
+
+        for idx, rule in enumerate(self.rules):
+            logger.info(f'Rule parsing order {idx} {rule.name()}')
+
         self.senders = {}
         self.sources = []
         self.source_namespace_connection_string = config.get_source_connection_string()
@@ -770,7 +774,7 @@ class Router(MessagingHandler):
         properties['source_topic'] = source_topic_name
         message.properties = properties
         message.send(self.senders['DLQ'])
-        logger.warning("Message from {source_topic_name} sent to the DLQ '{message.body}'.")
+        logger.warning(f'Message from {source_topic_name} sent to the DLQ "{message.body}".')
         DLQ_COUNT.inc()
 
     def on_connection_closed(self, event):

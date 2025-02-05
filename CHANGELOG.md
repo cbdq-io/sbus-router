@@ -3,6 +3,13 @@
 
 ## Unreleased
 
+### Fix
+
+* More logging refactoring. [Ben Dalling]
+
+
+## 0.2.4 (2025-01-27)
+
 ### Features
 
 * Add the "ROUTER_ALLOWED_SASL_MECHS" environment variable. [Ben Dalling]
