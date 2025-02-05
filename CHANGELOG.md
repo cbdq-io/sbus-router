@@ -1,6 +1,7 @@
 # Changelog
 
 
+<<<<<<< HEAD
 ## 0.2.5 (2025-02-05)
 
 ### Fix
@@ -8,6 +9,8 @@
 * More logging refactoring. [Ben Dalling]
 
 
+=======
+>>>>>>> develop
 ## 0.2.4 (2025-01-27)
 
 ### Features
