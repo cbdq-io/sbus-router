@@ -4,13 +4,11 @@ import time
 
 import pytest
 import testinfra
-from proton import Message
-from proton._exceptions import Timeout
-from proton.utils import BlockingConnection
+from azure.servicebus import ServiceBusClient, ServiceBusMessage
+from azure.servicebus.amqp import AmqpMessageBodyType
 from pytest_bdd import given, parsers, scenario, then, when
 
-from replay_dlq import Container, DLQReplayHandler, RuntimeParams
-from router import ConnectionStringHelper, get_logger
+from router import get_logger
 
 logger = get_logger(__name__, logging.DEBUG)
 
@@ -31,12 +29,11 @@ def _(input_topic: str):
     return input_topic
 
 
-@given('the landing Service Bus Emulator', target_fixture='connection_details')
+@given('the landing Service Bus Emulator', target_fixture='connection_string')
 def _():
     """the landing Service Bus Emulator."""
     conn_str = 'Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;'
     conn_str += 'SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;'
-    conn_str = ConnectionStringHelper(conn_str)
     return conn_str
 
 
@@ -57,50 +54,33 @@ def _(output_topic: str):
     return output_topic
 
 
-@when('the DLQ messags are replayed')
-def _(connection_details: ConnectionStringHelper):
-    """the DLQ messags are replayed."""
-    runtime = RuntimeParams(
-        [
-            '--connection-string', connection_details.sbus_connection_string,
-            '--name', 'dlq',
-            '--subscription', 'dlq_replay'
-        ]
-    )
-    replayer = DLQReplayHandler(
-        f'{runtime.dlq_topic_name}/Subscriptions/{runtime.subscription}',
-        connection_details,
-        5,
-        logger
-    )
-    Container(replayer).run()
-
-
 @when('the input message is sent')
-def _(connection_details: ConnectionStringHelper, input_topic: str, output_topic: str, message_body: str):
+def _(connection_string: str, input_topic: str, output_topic: str, message_body: str):
     """the input message is sent."""
-    if output_topic == 'N/A':
-        conn = BlockingConnection(connection_details.amqp_url())
-        sender = conn.create_sender(input_topic)
-        sender.send(Message(body=message_body))
+    none_destination_topics = ['N/A', 'DLQ']
+
+    if output_topic in none_destination_topics:
+        client = ServiceBusClient.from_connection_string(connection_string)
+        sender = client.get_topic_sender(input_topic)
+        sender.send_messages(ServiceBusMessage(body=message_body))
         pytest.skip(f'Output topic is "{output_topic}".')
 
 
-@then('the DLQ count is 2')
+@then('the DLQ count is 1')
 def _():
-    """the DLQ count is 2."""
+    """the DLQ count is 1."""
     host = testinfra.get_host('docker://router')
     cmd = host.run('curl localhost:8000')
-    assert 'dlq_message_count_total 2.0' in cmd.stdout
+    assert 'dlq_message_count_total 1.0' in cmd.stdout
 
 
-def is_message_valid(message: Message, expected_body: str, topic_name: str) -> bool:
+def is_message_valid(message: ServiceBusMessage, expected_body: str, topic_name: str) -> bool:
     """
     Check the validity of the received message.
 
     Parameters
     ----------
-    message : proton.Message
+    ServiceBusMessage : azure.servicebus.ServiceBusMessage
         The message to be validated.
     expected_body : str
         The message body that is expected to be recieved.
@@ -114,43 +94,48 @@ def is_message_valid(message: Message, expected_body: str, topic_name: str) -> b
     """
     response = True
 
-    if topic_name == 'dlq':
-        if 'source_topic' not in message.properties:
-            logger.error('No "source_topic" properties in DLQ message.')
-            response = False
+    if message.body_type == AmqpMessageBodyType.DATA:
+        actual_body = b''.join(message.body).decode()
+    else:
+        actual_body = message.body
 
-    if message.body != expected_body:
+    if actual_body != expected_body:
         logger.error(f'Expected message "{expected_body}".')
-        logger.error(f'Actual message "{message.body}".')
+        logger.error(f'Actual message "{actual_body}".')
         response = False
 
     return response
 
 
 @then('the expected output message is received')
-def _(connection_details: ConnectionStringHelper, input_topic: str, output_topic: str, message_body: str):
+def _(connection_string: str, input_topic: str, output_topic: str, message_body: str):
     """The expected output message is received."""
-    conn = BlockingConnection(connection_details.amqp_url())
-    receiver = conn.create_receiver(f'{output_topic}/Subscriptions/test')
-    logger.debug(f'Receiver for "{output_topic}" created at {time.time()}.')
+    client = ServiceBusClient.from_connection_string(connection_string)
+    receiver = client.get_subscription_receiver(output_topic, 'test')
+    # time.sleep(0.5)  # Add delay to ensure the receiver is fully ready
 
-    time.sleep(0.5)  # Add delay to ensure the receiver is fully ready
-
-    sender = conn.create_sender(input_topic)
+    sender = client.get_topic_sender(input_topic)
     logger.debug(f'Sending message "{message_body}" to "{input_topic}" at {time.time()}.')
-    sender.send(Message(body=message_body))
+    sender.send_messages(ServiceBusMessage(body=message_body))
+    sender.close()
+    message_received = False
 
     for attempt in range(10):  # Retry receiving for up to 10 seconds
-        try:
-            logger.debug(f'Attempt {attempt + 1} to receive message from "{output_topic}".')
-            message = receiver.receive(timeout=1)
-            logger.debug(f'Message received: "{message.body}" at {time.time()}.')
-            receiver.accept()
-            break
-        except Timeout as e:
-            logger.warning(f'Receive attempt {attempt + 1} timed out: {e}')
-    else:
-        pytest.fail(f'Message not received within the retry limit from "{output_topic}".')
+        logger.debug(f'Attempt {attempt + 1} to receive message from "{output_topic}".')
+        messages = receiver.receive_messages(max_wait_time=1)
+        logger.debug(f'Received messages "{type(messages)}" -> "{messages}" {len(messages)}.')
 
-    conn.close()
+        if len(messages) == 0:
+            logger.warning(f'Receive attempt {attempt + 1} timed out.')
+            continue
+
+        message = messages[0]
+        logger.debug(f'Message received: "{str(message.body)}" of type "{message.body_type}".')
+        receiver.complete_message(message)
+        message_received = True
+        break
+
+    receiver.close()
+    client.close()
+    assert message_received, f'Message not received within the retry limit from "{output_topic}".'
     assert is_message_valid(message, message_body, output_topic)

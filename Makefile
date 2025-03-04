@@ -11,7 +11,7 @@ changelog:
 	gitchangelog > CHANGELOG.md
 
 clean:
-	docker compose -f tests/resources/docker-compose.yaml down -t 0
+	docker compose -f tests/resources/docker-compose.yaml down -t 0 --remove-orphans
 
 lint:
 	yamllint -s .

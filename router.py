@@ -33,23 +33,24 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
+import asyncio
 import json
 import logging
 import os
 import re
+import signal
 import sys
 from string import Template
-from urllib.parse import urlparse
 
 import jmespath
 import jsonschema
 import jsonschema.exceptions
-from azure.core.utils import parse_connection_string
+from azure.servicebus import ServiceBusMessage
+from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver
+from azure.servicebus.amqp import AmqpMessageBodyType
 from prometheus_client import Counter, Summary, start_http_server
-from proton import Message
-from proton.handlers import MessagingHandler
-from proton.reactor import Container
 
+__version__ = '0.2.5'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -78,190 +79,44 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
 
 logging.basicConfig()
 logger = get_logger(__file__)
-__version__ = '0.2.5'
 
 
-class ConnectionStringHelper:
+async def extract_message_body(message: ServiceBusMessage) -> str:
     """
-    A class for handling Azure Service Bus Connection Strings.
+    Extract and return the message body as a UTF-8 string.
 
-    Attributes
-    ----------
-    sbus_connection_string : str
-        The value provided by the constructor.
+    Uses `message.body_type` to handle different encoding scenarios.
 
     Parameters
     ----------
-    connection_string : str
-        An Azure Service Bus connection string.
+    message : ServiceBusMessage
+        The message received from Azure Service Bus.
+
+    Returns
+    -------
+    str
+        The extracted message body as a string.
+
+    Raises
+    ------
+    TypeError
+        If the body type is unsupported.
     """
+    body_type = message.body_type
 
-    def __init__(self, sbus_connection_string: str) -> None:
-        self.sbus_connection_string = sbus_connection_string
-        self.port(5671)
-        self.protocol('amqps')
-        self.parse()
-        self.netloc(f'{self.protocol()}://{self.hostname()}:{self.port()}')
-        url = f'{self.protocol()}://{self.key_name()}:{self.key_value()}'
-        url += f'@{self.hostname()}:{self.port()}'
-        self.amqp_url(url)
+    if body_type == AmqpMessageBodyType.DATA:
+        # Body is binary data (bytes or memoryview)
+        return b''.join(message.body).decode()
 
-    def amqp_url(self, amqp_url: str = None) -> str:
-        """
-        Get or set an AMQP URL.
+    if body_type == AmqpMessageBodyType.SEQUENCE:
+        # Body is a sequence (list of values) -> Convert to a JSON string
+        return json.dumps(message.body)
 
-        Parameters
-        ----------
-        amqp_url : str, optional
-            The URL to be set, by default None
+    if body_type == AmqpMessageBodyType.VALUE:
+        # Body is a single value (string, integer, JSON object) -> Convert to str
+        return str(message.body)
 
-        Returns
-        -------
-        str
-            The set URL.
-        """
-        if amqp_url is not None:
-            self._amqp_url = amqp_url
-        return self._amqp_url
-
-    def hostname(self, hostname: str = None) -> str:
-        """
-        Get or set the host name.
-
-        Parameters
-        ----------
-        hostname : str, optional
-            The host name to be set, by default None
-
-        Returns
-        -------
-        str
-            The set host name.
-        """
-        if hostname is not None:
-            self._hostname = hostname
-        return self._hostname
-
-    def key_name(self, key_name: str = None) -> str:
-        """
-        Get or set the key name.
-
-        Parameters
-        ----------
-        key_name : str
-            The key name to be set.
-
-        Returns
-        -------
-        str
-            The key name that is set.
-        """
-        if key_name is not None:
-            self._key_name = key_name
-        return self._key_name
-
-    def key_value(self, key_value: str = None) -> str:
-        """
-        Get or set the key value.
-
-        Parameters
-        ----------
-        key_value : str
-            The key value to be set.
-
-        Returns
-        -------
-        str
-            The key value that is set.
-        """
-        if key_value is not None:
-            self._key_value = key_value
-        return self._key_value
-
-    def netloc(self, netloc: str = None) -> str:
-        """
-        Get or set the netloc.
-
-        Parameters
-        ----------
-        netloc : str, optional
-            The value to set.
-
-        Returns
-        -------
-        str
-            The currently set value.
-        """
-        if netloc is not None:
-            self._netloc = netloc
-
-        return self._netloc
-
-    def parse(self) -> None:
-        """
-        Parse the connection string.
-
-        Raises
-        ------
-        ValueError
-            If mandatory components are missing in the connection string.
-        """
-        conn_str_components = dict(parse_connection_string(self.sbus_connection_string))
-        use_development_emulator = conn_str_components.get('usedevelopmentemulator', 'False').capitalize()
-        use_development_emulator = use_development_emulator == 'True'
-
-        if use_development_emulator:
-            self.port(5672)
-            self.protocol('amqp')
-
-        try:
-            endpoint = conn_str_components['endpoint']
-            url = urlparse(endpoint)
-            self.hostname(url.netloc)
-            self.key_name(conn_str_components['sharedaccesskeyname'])
-            self.key_value(conn_str_components['sharedaccesskey'])
-        except KeyError:
-            raise ValueError(f'Connection string "{self.sbus_connection_string}" is invalid.')
-
-    def port(self, port: int = None) -> int:
-        """
-        Get or set the port number.
-
-        Parameters
-        ----------
-        port : int
-            The port number to be set.
-
-        Returns
-        -------
-        int
-            The port number that is set.
-        """
-        if port is not None:
-            self._port = port
-
-        return self._port
-
-    def protocol(self, protocol: str = None) -> str:
-        """
-        Get or set the protocol to be used for connecting to AMQP.
-
-        Valid values are amqp or amqps.
-
-        Parameters
-        ----------
-        protocol : str, optional
-            The protocol to be used, by default None
-
-        Returns
-        -------
-        str
-            The protocol that has been set.
-        """
-        if protocol is not None:
-            self._protocol = protocol
-
-        return self._protocol
+    raise TypeError(f'Unsupported message body type: {body_type}')
 
 
 class RouterRule:
@@ -279,19 +134,16 @@ class RouterRule:
     ----------
     definition : str
         The definition as passed to the constructor.
-    destination_namespaces : str
+    destination_namespaces : list
         The destination namespaces for messages matching this rule.
-    destination_topics : str
-        The destination  topics for the messages matching this rule.
+    destination_topics : list
+        The destination topics for the messages matching this rule.
     jmespath : str
         A JMESPath string for checking against a JSON payload.
     regexp : str
-        A regular expression for comparing against the message, or if a
-        JMESPath string was provided, it will be used to compare against
-        the value returned from that.
+        A regular expression for comparing against the message.
     source_topic : str
-        The name of the source topic that makes up some the the matching
-        criteria for the rule.
+        The name of the source topic that makes up some of the matching criteria for the rule.
     """
 
     def __init__(self, name: str, definition: str) -> None:
@@ -315,27 +167,6 @@ class RouterRule:
         self.source_topic = parsed_definition['source_topic']
         self.parsed_definition = parsed_definition
 
-    def decode_message(self, message: bytes) -> str:
-        """
-        Decode bytes to a string.
-
-        Parameters
-        ----------
-        message : bytes
-            The message as a collection of bytes.
-
-        Returns
-        -------
-        str
-            The message decoded to be a string.
-        """
-        if isinstance(message, str):
-            return message
-        elif isinstance(message, memoryview):
-            message = message.tobytes()
-
-        return message.decode('utf-8')
-
     def flatten_list(self, data: list) -> list:
         """
         Flatten a possibly deeply nested list.
@@ -352,76 +183,65 @@ class RouterRule:
         """
         flat_list = []
         for item in data:
-            if isinstance(item, list):  # Check if the item is a list
+            if isinstance(item, list):
                 flat_list.extend(self.flatten_list(item))  # Recursively flatten it
             else:
-                flat_list.append(item)  # Otherwise, add the item to the flat list
+                flat_list.append(item)
         return flat_list
 
-    def get_data(self, message: object) -> list:
+    def get_data(self, message_body: str) -> list:
         """
-        Get the data required from the message to do a comparison.
+        Extract the relevant data from the message body for rule evaluation.
 
-        If the message is binary, convert it to a string.  If the rule has a
-        jmespath then try and parse the message into JSON (not a failure if
-        this fails) and return the data from the jmes path for comparison.
+        If the rule has a JMESPath, it attempts to extract relevant data.
 
         Parameters
         ----------
-        message : object (str/bytes)
-            The message to be parsed.
+        message_body : str
+            The message body as a string.
 
         Returns
         -------
         list
-            The data for comparison.
+            The extracted data for comparison.
         """
-        message = self.decode_message(message)
-
         if not self.jmespath:
-            return [message]
+            return [message_body]
 
         try:
-            message = json.loads(message)
+            message_json = json.loads(message_body)
         except json.decoder.JSONDecodeError:
             return []
 
-        result = jmespath.search(self.jmespath, message)
+        result = jmespath.search(self.jmespath, message_json)
 
         if isinstance(result, list):
-            logger.debug(f'List result is "{result}".')
-            result = self.flatten_list(result)
-            logger.debug(f'Converted result to "{result}".')
-            return result
-        elif result is None:
-            logger.debug(f'No match for JMESPath "{self.jmespath}" in "{message}".')
+            return self.flatten_list(result)
+        if result is None:
             return []
 
         return [result]
 
-    def is_data_match(self, message: str) -> bool:
+    def is_data_match(self, message_body: str) -> bool:
         """
-        Check if the message content matches a regexp.
+        Check if the message content matches a regular expression.
 
         Parameters
         ----------
-        message : str
-            The message to be checked.
+        message_body : str
+            The message body to be checked.
 
         Returns
         -------
         bool
-            Does the data match.
+            True if the message matches, otherwise False.
         """
-        data = self.get_data(message)
+        data = self.get_data(message_body)
         prog = re.compile(self.regexp)
 
-        if data and any(prog.search(element) for element in data):
-            return True
+        return any(prog.search(element) for element in data) if data else False
 
-        return False
-
-    def is_match(self, source_topic_name: str, message: str) -> tuple:
+    def is_match(self, source_topic_name: str, message_body: str) -> tuple:
         """
         Check if the provided message and source topics match this rule.
 
@@ -429,25 +249,22 @@ class RouterRule:
         ----------
         source_topic_name : str
             The name of the topic that this message was consumed from.
-        message : str
-            The message that was consumed from the topic.
+        message_body : str
+            The message body as a string.
 
         Returns
         -------
-        tuple[bool, destination_topic, destination_namespace]
-            A tuple containing if the rule is a match to the message, the
-            destination namespaces(s) and the destination topics(s).
+        tuple[bool, list, list]
+            A tuple containing:
+            - Whether the rule matches the message
+            - The destination namespaces
+            - The destination topics
         """
-        logger.debug(f'Checking message against rule {self.name()}...')
         if source_topic_name == self.source_topic:
-            if not self.regexp:
-                return True, self.destination_namespaces, self.destination_topics
-            elif self.is_data_match(message):
+            if not self.regexp or self.is_data_match(message_body):
                 return True, self.destination_namespaces, self.destination_topics
 
-        # If we got here, it ain't a match.
-        logger.debug(f'Rule {self.name()} does not match against the message.')
-        return (False, None, None)
+        return False, None, None
 
     def name(self, name: str = None) -> str:
         """
@@ -455,13 +272,13 @@ class RouterRule:
 
         Parameters
         ----------
-        name : str, optional.
+        name : str, optional
             The name of the rule being set.
 
         Returns
         -------
         str
-            The name of the set rule.
+            The rule name.
         """
         if name is not None:
             self._name = name
@@ -469,7 +286,7 @@ class RouterRule:
 
     def parse_definition(self, definition: str) -> dict:
         """
-        Parse the rule definition.
+        Parse and validate the rule definition.
 
         Parameters
         ----------
@@ -486,20 +303,19 @@ class RouterRule:
         json.decoder.JSONDecodeError
             If the provided string can't be parsed as JSON.
         jsonschema.exceptions.ValidationError
-            If the string was parsed as JSON, but doesn't comply with the
-            schema of the rules.
+            If the string was parsed as JSON, but doesn't comply with the schema of the rules.
         """
-        with open('rule-schema.json', 'r') as stream:
-            schema = json.load(stream)
+        with open('rule-schema.json', 'r') as schema_file:
+            schema = json.load(schema_file)
 
         try:
             instance = json.loads(definition)
             jsonschema.validate(instance=instance, schema=schema)
         except json.decoder.JSONDecodeError as ex:
-            logger.error(f'{self.name()} ("{definition}") is not valid JSON.  {ex}')
+            logger.error(f'Rule "{self.name()}" contains invalid JSON: {ex}')
             sys.exit(2)
         except jsonschema.exceptions.ValidationError as ex:
-            logger.error(f'{self.name()} is not valid {ex}')
+            logger.error(f'Rule "{self.name()}" does not conform to schema: {ex}')
             sys.exit(2)
 
         return instance
@@ -557,6 +373,14 @@ class ServiceBusNamespaces:
         """
         return self._namespaces[name]
 
+    def get_all_namespaces(self) -> dict:
+        """
+        Return a dictionary of all namespaces.
+
+        The key is the namespace name, the value is the connection string.
+        """
+        return self._namespaces
+
 
 class EnvironmentConfigParser:
     """
@@ -570,17 +394,6 @@ class EnvironmentConfigParser:
 
     def __init__(self, environ: dict = dict(os.environ)) -> None:
         self._environ = environ
-
-    def get_dead_letter_queue(self) -> str:
-        """
-        Return the DLQ topic name.
-
-        Returns
-        -------
-        str
-            The name of the DLQ topic.
-        """
-        return self._environ['ROUTER_DLQ_TOPIC']
 
     def get_prefixed_values(self, prefix: str) -> list:
         """
@@ -642,19 +455,6 @@ class EnvironmentConfigParser:
         """Get the connection string of the source namespace."""
         return self._environ['ROUTER_SOURCE_CONNECTION_STRING']
 
-    def get_source_url(self) -> str:
-        """
-        Get the URL of the source Service Bus Namespace.
-
-        Returns
-        -------
-        str
-            A URL suitable for AMQP connection.
-        """
-        connection_string = self._environ['ROUTER_SOURCE_CONNECTION_STRING']
-        helper = ConnectionStringHelper(connection_string)
-        return helper.amqp_url()
-
     def service_bus_namespaces(self) -> ServiceBusNamespaces:
         """
         Get the Service Bus namespaces as defined in the environment.
@@ -686,225 +486,75 @@ class EnvironmentConfigParser:
 
         return response
 
-    def topics_and_subscriptions(self) -> list:
+    def topics_and_subscriptions(self) -> dict:
         """
-        Extract a dictionary of the topics and subscriptions.
+        Extract a dictionary of the source topics and subscriptions.
 
         Returns
         -------
-        list
-            A list of dictionaries.  Each dictionary will contain two
-            elements called topic and subscription.
+        dict
+            A dictionary with the topic name as the key and the subscriptions
+            as a value.
         """
-        response = []
-        found_values = []
+        response = {}
         rules = self.get_rules()
 
         for rule in rules:
-            value = f'{rule.source_subscription}:{rule.source_topic}'
-
-            if value not in found_values:
-                response.append(
-                    {
-                        'subscription': rule.source_subscription,
-                        'topic': rule.source_topic
-                    }
-                )
-                found_values.append(value)
+            response[rule.source_topic] = [rule.source_subscription]
 
         return response
 
 
-class Router(MessagingHandler):
-    """An implementation for the MessagingHandler."""
+class ServiceBusHandler:
+    """
+    A handler to process async Service Bus messages.
 
-    def __init__(self, config: EnvironmentConfigParser):
-        super().__init__()
-        self.config = config
-        self.connections = {}
-        self.dlq_topic = config.get_dead_letter_queue()
-        self.namespaces = config.service_bus_namespaces()
-        self.rules = config.get_rules()
+    Parameters
+    ----------
+    dict : namespaces
+        The destination namespaces.
+    dict : input_topics
+        The source topics and their associated subscriptions.
+    list[RouterRule] : rules
+        The rules to test the messages against.
+    """
+
+    def __init__(self, namespaces: dict, input_topics: dict, rules: list[RouterRule]):
+        self.namespaces = namespaces
+        self.input_topics = input_topics
+        self.rules = rules
 
         for idx, rule in enumerate(self.rules):
             logger.info(f'Rule parsing order {idx} {rule.name()}')
 
+        self.clients = {}
         self.senders = {}
-        self.sources = []
-        self.source_namespace_connection_string = config.get_source_connection_string()
-        self.parse_config_data()
-        start_http_server(config.get_prometheus_port())
 
-    def forward_message(self, message: Message, destination_namespaces: list, destination_topics: list):
+    async def close(self):
+        """Gracefully close all clients and senders."""
+        await asyncio.gather(*(sender.close() for sender in self.senders.values()))
+        await asyncio.gather(*(client.close() for client in self.clients.values()))
+
+    async def get_sender(self, namespace: str, topic: str):
         """
-        Forward a message to specified topics synchronously.
+        Retrieve or create a sender for the given namespace and topic.
 
         Parameters
         ----------
-        message : proton.Message
-            The message to forward.
-        destination_namespaces : list
-            Namespaces where the message will be forwarded.
-        destination_topics : list
-            Topics where the message will be forwarded.
+        namespace : str
+            The name of the destination namespace.
+        topic : str
+            The name of the destination topic.
         """
-        for idx, namespace_name in enumerate(destination_namespaces):
-            destination_topic = destination_topics[idx]
-            sender_name = f'{namespace_name}/{destination_topic}'
-            sender = self.senders[sender_name]
-            sender.send(message)
-            logger.debug(f'Message sent to {destination_topic} in namespace {namespace_name}.')
-
-    def handle_dlq_message(self, message: Message, source_topic_name: str) -> None:
-        """
-        Send a message to the DLQ.
-
-        Parameters
-        ----------
-        message : proton.Message
-            The message that needs to be sent to the DLQ.
-        source_topic_name : str
-            The name of the DLQ topic.
-        """
-        properties = message.properties
-
-        if properties is None:
-            properties = {}
-
-        properties['source_topic'] = source_topic_name
-        message.properties = properties
-        message.send(self.senders['DLQ'])
-        logger.warning(f'Message from {source_topic_name} sent to the DLQ "{message.body}".')
-        DLQ_COUNT.inc()
-
-    def on_connection_closed(self, event):
-        """Catch an event."""
-        logger.info('Connection closed event.')
-        return super().on_connection_closed(event)
-
-    def on_connection_closing(self, event):
-        """Catch an event."""
-        logger.info('Connection closing event.')
-        return super().on_connection_closing(event)
-
-    def on_connection_error(self, event):
-        """Catch an event."""
-        logger.error('Connecion error event.')
-        return super().on_connection_error(event)
-
-    def on_unhandled(self, method, *args):
-        """Catch an event."""
-        logger.debug(f'An unhandled event has occurred "{method}" ({args})')
-        return super().on_unhandled(method, args)
-
-    def on_disconnected(self, event):
-        """Catch an event."""
-        logger.info('Disconnected event.')
-        return super().on_disconnected(event)
-
-    def on_link_closed(self, event):
-        """Catch an event."""
-        logger.info('Link closed event.')
-        return super().on_link_closed(event)
-
-    def on_link_closing(self, event):
-        """Catch an event."""
-        logger.info('Link closing event.')
-        return super().on_link_closing(event)
-
-    def on_link_error(self, event):
-        """Catch an event."""
-        logger.error('Link error event')
-        return super().on_link_error(event)
-
-    def on_session_closed(self, event):
-        """Catch an event."""
-        logger.info('Session closed event.')
-        return super().on_session_closed(event)
-
-    def on_session_closing(self, event):
-        """Catch an event."""
-        logger.info('Session closing event.')
-        return super().on_session_closing(event)
-
-    def on_session_error(self, event):
-        """Catch an event."""
-        logger.error('Session error event.')
-        return super().on_session_error(event)
-
-    def on_message(self, event):
-        """Handle a message event."""
-        message = event.message
-        logger.debug(f'Message event from {event.link.source.address}.')
-        source_topic = event.link.source.address.split('/')[0]
-        self.process_message(source_topic, message)
-
-    def on_sendable(self, event):
-        """Respond to a sendable event."""
-        logger.debug('Sendable event.')
-
-    def on_start(self, event):
-        """Respond to a start event."""
-        logger.debug('Start event.')
-
-        for connection_string in self.connections.keys():
-            connection_details = ConnectionStringHelper(connection_string)
-            hostname = connection_details.netloc()
-            logger.debug(f'Creating a connection for {hostname}...')
-            connection = event.container.connect(
-                url=connection_details.netloc(),
-                allowed_mechs=os.getenv('ROUTER_ALLOWED_SASL_MECHS'),
-                password=connection_details.key_value(),
-                user=connection_details.key_name()
-            )
-            self.connections[connection_string] = connection
-            logger.info(f'Successfully created a connection for {hostname}.')
-
-        connection = self.connections[self.source_namespace_connection_string]
-
-        for source in self.sources:
-            logger.debug(f'Creating a receiver for "{source}".')
-            event.container.create_receiver(connection, source=source)
-
-        logger.debug(f'Creating a sender for the DLQ "{self.dlq_topic}"...')
-        dlq_sender = event.container.create_sender(connection, target=self.dlq_topic)
-
-        for sender in self.senders.keys():
-            logger.debug(f'Creating a sender for "{sender}".')
-            namespace, topic = tuple(sender.split('/'))
-            url = self.namespaces.get(namespace)
-            connection = self.connections[url]
-            self.senders[sender] = event.container.create_sender(connection, target=topic)
-
-        self.senders['DLQ'] = dlq_sender
-
-    def parse_config_data(self) -> dict:
-        """Create a dict of connections with the URL as a key."""
-        url_list = [self.source_namespace_connection_string]
-        service_bus_namespaces = self.config.service_bus_namespaces()
-        sources = []
-
-        for rule in self.rules:
-            source = f'{rule.source_topic}/Subscriptions/{rule.source_subscription}'
-            sources.append(source)
-
-            for idx, dest_namespace in enumerate(rule.destination_namespaces):
-                url = service_bus_namespaces.get(dest_namespace)
-                url_list.append(url)
-                dest_topic = rule.destination_topics[idx]
-                sender = f'{dest_namespace}/{dest_topic}'
-                self.senders[sender] = None
-
-        # Make URL list unique values.
-        url_list = list(set(url_list))
-
-        for url in url_list:
-            self.connections[url] = None
-
-        self.sources = list(set(sources))
+        if (namespace, topic) not in self.senders:
+            client = self.clients.get(namespace)
+            if not client:
+                raise ValueError(f'Namespace "{namespace}" not found in configuration.')
+            self.senders[(namespace, topic)] = client.get_topic_sender(topic)
+        return self.senders[(namespace, topic)]
 
     @PROCESSING_TIME.time()
-    def process_message(self, source_topic: str, message: Message) -> int:
+    async def process_message(self, source_topic: str, message: ServiceBusMessage, receiver: ServiceBusReceiver):
         """
         Process the received message asynchronously.
 
@@ -912,37 +562,122 @@ class Router(MessagingHandler):
         ----------
         source_topic : str
             The name of the topic where the message was received from.
-        message: proton.Message
+        message : azure.servicebus.ServiceBusMessage
             The message to be processed.
-
-        Returns
-        -------
-        int
-            Zero if message is matched to a rule and forwarded successfully,
-            One if message is matched, but an error occurs during forwarding.
-            Two if the message is not matched to any rules.
+        receiver : azure.servicebus.ServiceBusReceiver
+            The receiver that the message came in on.
         """
-        logger.debug('Process message...')
+        message_body = await extract_message_body(message)
 
         for rule in self.rules:
-            is_match, destination_namespaces, destination_topics = rule.is_match(source_topic, message.body)
+            is_match, destination_namespaces, destination_topics = rule.is_match(
+                source_topic,
+                message_body
+            )
 
             if is_match:
                 try:
-                    logger.debug(f'Matched message successfully to rule {rule.name()}.')
-                    self.forward_message(message, destination_namespaces, destination_topics)
-                    logger.debug(f'Message forwarded to destinations: {destination_topics}')
-                    return 0
+                    logger.debug(f'Successfully matched message to {rule.name()}.')
+                    await self.send_message(destination_namespaces, destination_topics, message_body)
+                    await receiver.complete_message(message)
+                    return
                 except Exception as e:
-                    logger.error(f'Failed to forward message: {e}')
-                    return 1
+                    logger.error(f'Failed to send message: {e}')
+                    await receiver.abandon_message(message)
+                    return
 
-        self.handle_dlq_message(message, source_topic)
-        return 2
+        # No matching rule: Send to DLQ
+        logger.warning(f'No rules match message from {source_topic}, sending to the DLQ.')
+
+        try:
+            await receiver.dead_letter_message(
+                reason='No rules match this message.',
+                error_description=f'Message {message_body} could not be processed.',
+                message=message
+            )
+            DLQ_COUNT.inc()
+        except Exception as e:
+            logger.error(f'Failed to send message to DLQ: {e}')
+            await receiver.abandon_message(message)
+
+    async def receive_and_process(self, topic_name, subscription_name):
+        """Receive messages, process them, and forward."""
+        for namespace, client in self.clients.items():
+            try:
+                receiver = client.get_subscription_receiver(topic_name, subscription_name)
+                async with receiver:
+                    async for msg in receiver:
+                        try:
+                            await self.process_message(topic_name, msg, receiver)
+                        except Exception as e:
+                            logger.error(f'Error processing message: {e}')
+                            await receiver.abandon_message(msg)
+            except Exception as e:
+                logger.error(f'Receiver error in {namespace}: {e}')
+
+    async def run(self):
+        """Start all receivers concurrently."""
+        receive_tasks = [
+            self.receive_and_process(topic, sub)
+            for topic, subs in self.input_topics.items()
+            for sub in subs
+        ]
+        await asyncio.gather(*receive_tasks)
+
+    async def send_message(self, namespaces: list, topics: list, message_body: str):
+        """
+        Send a message to the correct namespace and topic.
+
+        Parameters
+        ----------
+        namespaces : list[str]
+            The namespaces this message should be sent to.
+        topics : list[str]
+            The topics this message should be sent to.
+        message_body : str
+            The body of the message to be sent.
+        """
+        for idx, namespace_name in enumerate(namespaces):
+            topic_name = topics[idx]
+            sender = await self.get_sender(namespace_name, topic_name)
+            await sender.send_messages(ServiceBusMessage(body=message_body))
+
+    async def start(self):
+        """Initialize Service Bus clients and senders."""
+        for namespace, conn_str in self.namespaces.items():
+            self.clients[namespace] = ServiceBusClient.from_connection_string(conn_str)
+
+
+async def main():
+    """Configure the handler."""
+    config = EnvironmentConfigParser()
+    handler = ServiceBusHandler(
+        config.service_bus_namespaces().get_all_namespaces(),
+        config.topics_and_subscriptions(),
+        config.get_rules()
+    )
+
+    try:
+        await handler.start()
+        loop = asyncio.get_running_loop()
+        stop_event = asyncio.Event()
+
+        def shutdown():
+            logger.warning('Shutdown signal received. Cleaning up...')
+            stop_event.set()
+
+        loop.add_signal_handler(signal.SIGTERM, shutdown)
+        loop.add_signal_handler(signal.SIGINT, shutdown)  # Handle CTRL+C
+
+        await handler.run()  # Start processing messages
+        await stop_event.wait()  # Wait for shutdown signal
+
+    finally:
+        await handler.close()  # Ensure all connections are properly closed
 
 
 if __name__ == '__main__':
     logger.info(f'Starting version "{__version__}".')
-    router = Router(EnvironmentConfigParser())
-    container = Container(router)
-    container.run()
+    config = EnvironmentConfigParser()
+    start_http_server(config.get_prometheus_port())
+    asyncio.run(main())

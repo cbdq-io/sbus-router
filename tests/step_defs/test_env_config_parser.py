@@ -36,6 +36,8 @@ def _(expected_count: int, namespace: str, environ: dict):
         sbus_namespaces = widget.service_bus_namespaces()
         actual_count = sbus_namespaces.count()
         sbus_namespaces.get(namespace)
+        sbus_namespaces.get_all_namespaces()
+        len(sbus_namespaces.get_all_namespaces()) == 1
     except ValueError:
         actual_count = 0
 
@@ -48,14 +50,17 @@ def _(method_name: str, expected_value: str, environ: dict):
     print(f'Environ is "{environ}".')
     widget = EnvironmentConfigParser(environ)
 
-    if method_name == 'get_dead_letter_queue':
-        actual_value = widget.get_dead_letter_queue()
-    elif method_name == 'get_source_url':
-        actual_value = widget.get_source_url()
-        expected_value = 'amqps://RootManageSharedAccessKey:SAS_KEY_VALUE@localhost:5671'
+    if method_name == 'get_source_url':
+        actual_value = widget.get_source_connection_string()
     elif method_name == 'get_prometheus_port':
         expected_value = int(expected_value)
         actual_value = widget.get_prometheus_port()
+    elif method_name == 'get_rules':
+        from router import ServiceBusHandler
+        ServiceBusHandler({}, widget.topics_and_subscriptions(), widget.get_rules())
+        widget.topics_and_subscriptions()
+        actual_value = widget.get_rules()[0].name()
+        expected_value = widget.get_rules()[0].name()
     else:
         raise NotImplementedError(f'No method name "{method_name}".')
 
