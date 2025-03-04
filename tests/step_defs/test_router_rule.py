@@ -46,12 +46,6 @@ def _(message_file: str):
     return data.strip()
 
 
-@given(parsers.parse('the RouterRule message is {is_binary}'), target_fixture='is_message_binary')
-def _(is_binary: str):
-    """the RouterRule message is <is_binary>."""
-    return is_binary.capitalize() == 'True'
-
-
 @given(parsers.parse('the RouterRule source topic is {source_topic}'), target_fixture='source_topic')
 def _(source_topic: str):
     """the RouterRule source topic is <source_topic>."""
@@ -71,11 +65,8 @@ def _():
 
 
 @then(parsers.parse('the RouterRule match is {is_match}'))
-def _(is_match: str, router_rule: RouterRule, message_contents: str, is_message_binary: bool, source_topic: str):
+def _(is_match: str, router_rule: RouterRule, message_contents: str, source_topic: str):
     """the RouterRule match is <is_match>."""
-    if is_message_binary:
-        message_contents = message_contents.encode()
-
     expected_value = is_match.capitalize() == 'True'
     (actual_value, _, _) = router_rule.is_match(source_topic, message_contents)
     assert expected_value == actual_value

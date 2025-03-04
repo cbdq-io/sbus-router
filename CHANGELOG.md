@@ -5,6 +5,16 @@
 
 ### Fix
 
+* Migrate from Qpid Proton to Azure Service Bus SDK. [Ben Dalling]
+
+  BREAKING CHANGE: Removed the separate DLQ topic in favour of the
+  native DLQ process.
+
+
+## 0.2.5 (2025-02-05)
+
+### Fix
+
 * More logging refactoring. [Ben Dalling]
 
 
