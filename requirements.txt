@@ -1,4 +1,5 @@
 azure-core
+azure-servicebus
 jmespath
 jsonschema
 prometheus-client
