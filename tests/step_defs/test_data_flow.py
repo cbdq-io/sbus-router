@@ -112,7 +112,6 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
     """The expected output message is received."""
     client = ServiceBusClient.from_connection_string(connection_string)
     receiver = client.get_subscription_receiver(output_topic, 'test')
-    # time.sleep(0.5)  # Add delay to ensure the receiver is fully ready
 
     sender = client.get_topic_sender(input_topic)
     logger.debug(f'Sending message "{message_body}" to "{input_topic}" at {time.time()}.')

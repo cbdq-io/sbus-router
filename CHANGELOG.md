@@ -5,6 +5,17 @@
 
 ### Fix
 
+* Separate the sender and receiver namespaces. [Ben Dalling]
+
+* Add a metadata description to the image. [Ben Dalling]
+
+* Ensure netork diagnostic tools are on the image. [Ben Dalling]
+
+
+## 0.3.0 (2025-03-04)
+
+### Fix
+
 * Migrate from Qpid Proton to Azure Service Bus SDK. [Ben Dalling]
 
   BREAKING CHANGE: Removed the separate DLQ topic in favour of the
