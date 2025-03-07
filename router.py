@@ -50,7 +50,7 @@ from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver
 from azure.servicebus.amqp import AmqpMessageBodyType
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '0.3.0'
+__version__ = '0.3.1'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
