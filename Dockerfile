@@ -2,7 +2,12 @@ FROM python:3.12
 
 USER root
 
-RUN addgroup --gid 1000 appuser \
+# hadolint ignore=DL3008
+RUN apt-get update \
+  && apt-get install --no-install-recommends --yes bind9-dnsutils ncat \
+  && apt-get clean \
+  && rm -rf /var/lib/apt/lists/* \
+  && addgroup --gid 1000 appuser \
   && adduser \
     --uid 1000 \
     --gid 1000 \
