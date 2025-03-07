@@ -2,6 +2,8 @@ FROM python:3.12
 
 USER root
 
+LABEL org.opencontainers.image.description "A configurable router for Azure Service Bus."LABEL org.opencontainers.image.description "A configurable router for Azure Service Bus."LABEL org.opencontainers.image.description "A configurable router for Azure Service Bus."LABEL org.opencontainers.image.description "A configurable router for Azure Service Bus."
+
 # hadolint ignore=DL3008
 RUN apt-get update \
   && apt-get install --no-install-recommends --yes bind9-dnsutils ncat \
