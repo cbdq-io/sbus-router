@@ -57,7 +57,7 @@ def _(method_name: str, expected_value: str, environ: dict):
         actual_value = widget.get_prometheus_port()
     elif method_name == 'get_rules':
         from router import ServiceBusHandler
-        ServiceBusHandler({}, widget.topics_and_subscriptions(), widget.get_rules())
+        ServiceBusHandler(None, {}, widget.topics_and_subscriptions(), widget.get_rules())
         widget.topics_and_subscriptions()
         actual_value = widget.get_rules()[0].name()
         expected_value = widget.get_rules()[0].name()

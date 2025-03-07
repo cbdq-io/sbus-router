@@ -1,6 +1,17 @@
 # Changelog
 
 
+## 0.3.1 (2025-03-07)
+
+### Fix
+
+* Separate the sender and receiver namespaces. [Ben Dalling]
+
+* Add a metadata description to the image. [Ben Dalling]
+
+* Ensure netork diagnostic tools are on the image. [Ben Dalling]
+
+
 ## 0.3.0 (2025-03-04)
 
 ### Fix
