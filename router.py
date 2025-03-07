@@ -511,6 +511,8 @@ class ServiceBusHandler:
 
     Parameters
     ----------
+    str : source_connection_string
+        The connection string of the source namespace.
     dict : namespaces
         The destination namespaces.
     dict : input_topics
@@ -519,21 +521,26 @@ class ServiceBusHandler:
         The rules to test the messages against.
     """
 
-    def __init__(self, namespaces: dict, input_topics: dict, rules: list[RouterRule]):
-        self.namespaces = namespaces
+    def __init__(self, source_connection_string: str, namespaces: dict, input_topics: dict, rules: list[RouterRule]):
+        self.source_connection_string = source_connection_string
+        self.namespaces = namespaces  # Used for sending, not receiving
         self.input_topics = input_topics
         self.rules = rules
 
         for idx, rule in enumerate(self.rules):
             logger.info(f'Rule parsing order {idx} {rule.name()}')
 
-        self.clients = {}
+        self.source_client = None  # Used for receiving
+        self.clients = {}  # Used for sending
         self.senders = {}
 
     async def close(self):
         """Gracefully close all clients and senders."""
+        logger.warning('Closing all connections on shutdown.')
         await asyncio.gather(*(sender.close() for sender in self.senders.values()))
         await asyncio.gather(*(client.close() for client in self.clients.values()))
+        if self.source_client:
+            await self.source_client.close()
 
     async def get_sender(self, namespace: str, topic: str):
         """
@@ -547,6 +554,7 @@ class ServiceBusHandler:
             The name of the destination topic.
         """
         if (namespace, topic) not in self.senders:
+            logger.debug(f'Creating a sender for {namespace}/{topic}.')
             client = self.clients.get(namespace)
             if not client:
                 raise ValueError(f'Namespace "{namespace}" not found in configuration.')
@@ -602,21 +610,24 @@ class ServiceBusHandler:
 
     async def receive_and_process(self, topic_name, subscription_name):
         """Receive messages, process them, and forward."""
-        for namespace, client in self.clients.items():
-            try:
-                receiver = client.get_subscription_receiver(topic_name, subscription_name)
-                async with receiver:
-                    async for msg in receiver:
-                        try:
-                            await self.process_message(topic_name, msg, receiver)
-                        except Exception as e:
-                            logger.error(f'Error processing message: {e}')
-                            await receiver.abandon_message(msg)
-            except Exception as e:
-                logger.error(f'Receiver error in {namespace}: {e}')
+        if not self.source_client:
+            logger.error('Source client is not initialized, cannot receive messages.')
+            return
+
+        try:
+            receiver = self.source_client.get_subscription_receiver(topic_name, subscription_name)
+            async with receiver:
+                async for msg in receiver:
+                    try:
+                        await self.process_message(topic_name, msg, receiver)
+                    except Exception as e:
+                        logger.error(f'Error processing message: {e}')
+                        await receiver.abandon_message(msg)
+        except Exception as e:
+            logger.error(f'Receiver error in source namespace: {e}')
 
     async def run(self):
-        """Start all receivers concurrently."""
+        """Start all receivers."""
         receive_tasks = [
             self.receive_and_process(topic, sub)
             for topic, subs in self.input_topics.items()
@@ -643,8 +654,12 @@ class ServiceBusHandler:
             await sender.send_messages(ServiceBusMessage(body=message_body))
 
     async def start(self):
-        """Initialize Service Bus clients and senders."""
+        """Initialize Service Bus client for receiving and clients for sending."""
+        logger.debug('Creating connection for source namespace.')
+        self.source_client = ServiceBusClient.from_connection_string(self.source_connection_string)
+
         for namespace, conn_str in self.namespaces.items():
+            logger.debug(f'Creating connection for destination namespace: {namespace}.')
             self.clients[namespace] = ServiceBusClient.from_connection_string(conn_str)
 
 
@@ -652,6 +667,7 @@ async def main():
     """Configure the handler."""
     config = EnvironmentConfigParser()
     handler = ServiceBusHandler(
+        config.get_source_connection_string(),
         config.service_bus_namespaces().get_all_namespaces(),
         config.topics_and_subscriptions(),
         config.get_rules()
