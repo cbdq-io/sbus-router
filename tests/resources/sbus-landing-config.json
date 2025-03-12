@@ -22,7 +22,7 @@
                   "MaxDeliveryCount": 10,
                   "ForwardDeadLetteredMessagesTo": "",
                   "ForwardTo": "",
-                  "RequiresSession": false
+                  "RequiresSession": true
                 }
               }
             ]

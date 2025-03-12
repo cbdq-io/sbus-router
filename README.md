@@ -36,6 +36,8 @@ The configurable fields for rules are:
 - `regexp`: A
   [regular expression](https://en.wikipedia.org/wiki/Regular_expression)
   that will me used to match against the data returned from `jmespath`.
+- `requires_session`: Should sessions be enabled for the source/destination
+  topics.  Defaults to false.
 - `source_subscription`: The subscription from which data will be retrieved.
 - `source_topic`: The topic from which data will be retrieved.
 

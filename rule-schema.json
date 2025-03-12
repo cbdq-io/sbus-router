@@ -34,6 +34,11 @@
       "description": "A regular expression pattern for matching data.",
       "type": "string"
     },
+    "requires_session": {
+      "description": "Flag indicating whether a session is required.",
+      "type": "boolean",
+      "default": false
+    },
     "source_subscription": {
       "description": "The subscription from which data will be retrieved.",
       "type": "string"

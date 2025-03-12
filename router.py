@@ -142,6 +142,8 @@ class RouterRule:
         A JMESPath string for checking against a JSON payload.
     regexp : str
         A regular expression for comparing against the message.
+    requires_session : bool
+        Does the source subscription require a session.
     source_topic : str
         The name of the source topic that makes up some of the matching criteria for the rule.
     """
@@ -163,6 +165,7 @@ class RouterRule:
 
         self.jmespath = parsed_definition.get('jmespath', None)
         self.regexp = parsed_definition.get('regexp', None)
+        self.requires_session = parsed_definition.get('requires_session', False)
         self.source_subscription = parsed_definition['source_subscription']
         self.source_topic = parsed_definition['source_topic']
         self.parsed_definition = parsed_definition
@@ -586,7 +589,12 @@ class ServiceBusHandler:
             if is_match:
                 try:
                     logger.debug(f'Successfully matched message to {rule.name()}.')
-                    await self.send_message(destination_namespaces, destination_topics, message_body)
+                    await self.send_message(
+                        destination_namespaces,
+                        destination_topics,
+                        message_body,
+                        session_id=message.session_id
+                    )
                     await receiver.complete_message(message)
                     return
                 except Exception as e:
@@ -608,23 +616,61 @@ class ServiceBusHandler:
             logger.error(f'Failed to send message to DLQ: {e}')
             await receiver.abandon_message(message)
 
+    async def process_session_receiver(self, topic_name: str, receiver: ServiceBusReceiver):
+        """Receive messages with sessions, process then and forward them."""
+        async with receiver:
+            while True:
+                session_receiver = await receiver.accept_next_session()
+                logger.debug(f'Accepted session: {session_receiver.session_id}')
+                async with session_receiver:
+                    async for msg in session_receiver:
+                        try:
+                            await self.process_message(topic_name, msg, session_receiver)
+                        except Exception as e:
+                            logger.error(
+                                f'Error processing message in session {session_receiver.session_id}: {e}'
+                            )
+                            await session_receiver.abandon_message(msg)
+
+    async def process_standard_receiver(self, topic_name: str, receiver: ServiceBusReceiver):
+        """Receive messages without sessions, process then and forward them."""
+        async with receiver:
+            async for msg in receiver:
+                try:
+                    await self.process_message(topic_name, msg, receiver)
+                except Exception as e:
+                    logger.error(f'Error processing message: {e}')
+                    await receiver.abandon_message(msg)
+
     async def receive_and_process(self, topic_name, subscription_name):
         """Receive messages, process them, and forward."""
         if not self.source_client:
             logger.error('Source client is not initialized, cannot receive messages.')
             return
 
+        requires_session = await self.session_is_required(topic_name, subscription_name)
+
         try:
-            receiver = self.source_client.get_subscription_receiver(topic_name, subscription_name)
-            async with receiver:
-                async for msg in receiver:
-                    try:
-                        await self.process_message(topic_name, msg, receiver)
-                    except Exception as e:
-                        logger.error(f'Error processing message: {e}')
-                        await receiver.abandon_message(msg)
+            if requires_session:
+                receiver = self.source_client.get_subscription_session_receiver(topic_name, subscription_name)
+                await self.process_session_receiver(topic_name, receiver)
+            else:
+                receiver = self.source_client.get_subscription_receiver(topic_name, subscription_name)
+                await self.process_standard_receiver(topic_name, receiver)
         except Exception as e:
-            logger.error(f'Receiver error in source namespace: {e}')
+            logger.error(f'Receiver error in source namespace ({topic_name}/{subscription_name}): {e}')
+
+    async def session_is_required(self, topic_name: str, subscription_name: str) -> bool:
+        """Find if a subscription requires a session."""
+        response = False
+
+        for rule in self.rules:
+            if rule.source_topic == topic_name and rule.source_subscription == subscription_name:
+                response = rule.requires_session
+                break
+
+        logger.debug(f'Subscription {subscription_name} on topic {topic_name} session required {response}.')
+        return response
 
     async def run(self):
         """Start all receivers."""
@@ -635,7 +681,7 @@ class ServiceBusHandler:
         ]
         await asyncio.gather(*receive_tasks)
 
-    async def send_message(self, namespaces: list, topics: list, message_body: str):
+    async def send_message(self, namespaces: list, topics: list, message_body: str, session_id: str = None):
         """
         Send a message to the correct namespace and topic.
 
@@ -647,11 +693,13 @@ class ServiceBusHandler:
             The topics this message should be sent to.
         message_body : str
             The body of the message to be sent.
+        session_id : str, optional
+            The session ID (default is None).
         """
         for idx, namespace_name in enumerate(namespaces):
             topic_name = topics[idx]
             sender = await self.get_sender(namespace_name, topic_name)
-            await sender.send_messages(ServiceBusMessage(body=message_body))
+            await sender.send_messages(ServiceBusMessage(body=message_body, session_id=session_id))
 
     async def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""
