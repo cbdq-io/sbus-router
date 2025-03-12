@@ -10,8 +10,6 @@ least one rule configured  (see below).
 | Environment Variable | Required | Default | Description |
 | -------------------- | -------- | ------- | ----------- |
 | LOG_LEVEL | | WARN | The log level for the router.|
-| ROUTER_ALLOWED_SASL_MECHS | | None | A space limited list of allowed SASL mechanisms.  See <https://qpid.apache.org/releases/qpid-proton-0.38.0/proton/python/docs/proton.html?highlight=allowed_mechs#proton.SASL.allowed_mechs>. |
-| ROUTER_DLQ_TOPIC | Yes | | The name of a topic to route messages that no rules match. |
 | ROUTER_SOURCE_CONNECTION_STRING | Yes | | The connection string for the source Service Bus namespace. |
 
 ## Rules
