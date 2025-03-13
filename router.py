@@ -33,20 +33,22 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
-import asyncio
 import json
 import logging
 import os
 import re
 import signal
 import sys
+import threading
+import time
+from collections.abc import Generator
 from string import Template
 
 import jmespath
 import jsonschema
 import jsonschema.exceptions
-from azure.servicebus import ServiceBusMessage
-from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver
+from azure.servicebus import (NEXT_AVAILABLE_SESSION, ServiceBusClient,
+                              ServiceBusMessage, ServiceBusReceiver)
 from azure.servicebus.amqp import AmqpMessageBodyType
 from prometheus_client import Counter, Summary, start_http_server
 
@@ -81,7 +83,7 @@ logging.basicConfig()
 logger = get_logger(__file__)
 
 
-async def extract_message_body(message: ServiceBusMessage) -> str:
+def extract_message_body(message: ServiceBusMessage) -> str:
     """
     Extract and return the message body as a UTF-8 string.
 
@@ -105,18 +107,33 @@ async def extract_message_body(message: ServiceBusMessage) -> str:
     body_type = message.body_type
 
     if body_type == AmqpMessageBodyType.DATA:
-        # Body is binary data (bytes or memoryview)
         return b''.join(message.body).decode()
 
     if body_type == AmqpMessageBodyType.SEQUENCE:
-        # Body is a sequence (list of values) -> Convert to a JSON string
         return json.dumps(message.body)
 
     if body_type == AmqpMessageBodyType.VALUE:
-        # Body is a single value (string, integer, JSON object) -> Convert to str
         return str(message.body)
 
     raise TypeError(f'Unsupported message body type: {body_type}')
+
+
+def next_available_session_receiver(client: ServiceBusClient, topic_name: str, subscription_name: str,
+                                    stop_event: threading.Event) -> Generator[ServiceBusReceiver, None, None]:
+    """Yield the next available session."""
+    while not stop_event.is_set():
+        try:
+            receiver = client.get_subscription_receiver(
+                topic_name,
+                subscription_name,
+                session_id=NEXT_AVAILABLE_SESSION,
+                max_wait_time=0.05
+            )
+            with receiver:
+                yield receiver
+        except Exception as e:
+            logger.error(f'Error accepting session on {topic_name}/{subscription_name}: {e}')
+            time.sleep(1)
 
 
 class RouterRule:
@@ -142,8 +159,6 @@ class RouterRule:
         A JMESPath string for checking against a JSON payload.
     regexp : str
         A regular expression for comparing against the message.
-    requires_session : bool
-        Does the source subscription require a session.
     source_topic : str
         The name of the source topic that makes up some of the matching criteria for the rule.
     """
@@ -187,7 +202,7 @@ class RouterRule:
         flat_list = []
         for item in data:
             if isinstance(item, list):
-                flat_list.extend(self.flatten_list(item))  # Recursively flatten it
+                flat_list.extend(self.flatten_list(item))
             else:
                 flat_list.append(item)
         return flat_list
@@ -220,6 +235,7 @@ class RouterRule:
 
         if isinstance(result, list):
             return self.flatten_list(result)
+
         if result is None:
             return []
 
@@ -241,7 +257,6 @@ class RouterRule:
         """
         data = self.get_data(message_body)
         prog = re.compile(self.regexp)
-
         return any(prog.search(element) for element in data) if data else False
 
     def is_match(self, source_topic_name: str, message_body: str) -> tuple:
@@ -266,7 +281,6 @@ class RouterRule:
         if source_topic_name == self.source_topic:
             if not self.regexp or self.is_data_match(message_body):
                 return True, self.destination_namespaces, self.destination_topics
-
         return False, None, None
 
     def name(self, name: str = None) -> str:
@@ -310,7 +324,6 @@ class RouterRule:
         """
         with open('rule-schema.json', 'r') as schema_file:
             schema = json.load(schema_file)
-
         try:
             instance = json.loads(definition)
             jsonschema.validate(instance=instance, schema=schema)
@@ -320,7 +333,6 @@ class RouterRule:
         except jsonschema.exceptions.ValidationError as ex:
             logger.error(f'Rule "{self.name()}" does not conform to schema: {ex}')
             sys.exit(2)
-
         return instance
 
 
@@ -414,11 +426,9 @@ class EnvironmentConfigParser:
             elements representing the key and the value.
         """
         response = []
-
         for key in sorted(self._environ.keys()):
             if key.startswith(prefix):
                 response.append([key, self._environ[key]])
-
         return response
 
     def get_prometheus_port(self) -> int:
@@ -435,7 +445,7 @@ class EnvironmentConfigParser:
         port = self._environ.get('ROUTER_PROMETHEUS_PORT', '8000')
         return int(port)
 
-    def get_rules(self) -> list[RouterRule]:
+    def get_rules(self) -> list:
         """
         Extract a list of routing rules from the environment.
 
@@ -445,13 +455,11 @@ class EnvironmentConfigParser:
             A list of RouterRule objects.
         """
         response = []
-
         for item in self.get_prefixed_values('ROUTER_RULE_'):
             name = item[0].replace('ROUTER_RULE_', '')
             template = Template(item[1])
             definition = template.safe_substitute(os.environ)
             response.append(RouterRule(name, definition))
-
         return response
 
     def get_source_connection_string(self) -> str:
@@ -501,51 +509,39 @@ class EnvironmentConfigParser:
         """
         response = {}
         rules = self.get_rules()
-
         for rule in rules:
             response[rule.source_topic] = [rule.source_subscription]
-
         return response
 
 
 class ServiceBusHandler:
-    """
-    A handler to process async Service Bus messages.
+    """A synchronous handler to process Service Bus messages."""
 
-    Parameters
-    ----------
-    str : source_connection_string
-        The connection string of the source namespace.
-    dict : namespaces
-        The destination namespaces.
-    dict : input_topics
-        The source topics and their associated subscriptions.
-    list[RouterRule] : rules
-        The rules to test the messages against.
-    """
-
-    def __init__(self, source_connection_string: str, namespaces: dict, input_topics: dict, rules: list[RouterRule]):
+    def __init__(self, source_connection_string: str, namespaces: dict, input_topics: dict, rules: list):
         self.source_connection_string = source_connection_string
-        self.namespaces = namespaces  # Used for sending, not receiving
+        self.namespaces = namespaces  # For sending only.
         self.input_topics = input_topics
         self.rules = rules
 
         for idx, rule in enumerate(self.rules):
             logger.info(f'Rule parsing order {idx} {rule.name()}')
 
-        self.source_client = None  # Used for receiving
-        self.clients = {}  # Used for sending
+        self.source_client = None  # For receiving.
+        self.clients = {}         # For sending.
         self.senders = {}
 
-    async def close(self):
+    def close(self):
         """Gracefully close all clients and senders."""
         logger.warning('Closing all connections on shutdown.')
-        await asyncio.gather(*(sender.close() for sender in self.senders.values()))
-        await asyncio.gather(*(client.close() for client in self.clients.values()))
-        if self.source_client:
-            await self.source_client.close()
 
-    async def get_sender(self, namespace: str, topic: str):
+        for sender in self.senders.values():
+            sender.close()
+        for client in self.clients.values():
+            client.close()
+        if self.source_client:
+            self.source_client.close()
+
+    def get_sender(self, namespace: str, topic: str):
         """
         Retrieve or create a sender for the given namespace and topic.
 
@@ -559,13 +555,16 @@ class ServiceBusHandler:
         if (namespace, topic) not in self.senders:
             logger.debug(f'Creating a sender for {namespace}/{topic}.')
             client = self.clients.get(namespace)
+
             if not client:
                 raise ValueError(f'Namespace "{namespace}" not found in configuration.')
+
             self.senders[(namespace, topic)] = client.get_topic_sender(topic)
+
         return self.senders[(namespace, topic)]
 
     @PROCESSING_TIME.time()
-    async def process_message(self, source_topic: str, message: ServiceBusMessage, receiver: ServiceBusReceiver):
+    def process_message(self, source_topic: str, message: ServiceBusMessage, receiver: ServiceBusReceiver):
         """
         Process the received message asynchronously.
 
@@ -578,110 +577,129 @@ class ServiceBusHandler:
         receiver : azure.servicebus.ServiceBusReceiver
             The receiver that the message came in on.
         """
-        message_body = await extract_message_body(message)
+        message_body = extract_message_body(message)
 
         for rule in self.rules:
-            is_match, destination_namespaces, destination_topics = rule.is_match(
-                source_topic,
-                message_body
-            )
+            is_match, destination_namespaces, destination_topics = rule.is_match(source_topic, message_body)
 
             if is_match:
                 try:
-                    logger.debug(f'Successfully matched message to {rule.name()}.')
-                    await self.send_message(
+                    logger.debug(f'Successfully matched message on {source_topic} to {rule.name()}.')
+                    self.send_message(
                         destination_namespaces,
                         destination_topics,
                         message_body,
                         session_id=message.session_id
                     )
-                    await receiver.complete_message(message)
+                    receiver.complete_message(message)
                     return
                 except Exception as e:
                     logger.error(f'Failed to send message: {e}')
-                    await receiver.abandon_message(message)
+                    receiver.abandon_message(message)
                     return
 
-        # No matching rule: Send to DLQ
         logger.warning(f'No rules match message from {source_topic}, sending to the DLQ.')
-
         try:
-            await receiver.dead_letter_message(
+            receiver.dead_letter_message(
+                message,
                 reason='No rules match this message.',
-                error_description=f'Message {message_body} could not be processed.',
-                message=message
+                error_description=f'Message {message_body} could not be processed.'
             )
             DLQ_COUNT.inc()
         except Exception as e:
             logger.error(f'Failed to send message to DLQ: {e}')
-            await receiver.abandon_message(message)
+            receiver.abandon_message(message)
 
-    async def process_session_receiver(self, topic_name: str, receiver: ServiceBusReceiver):
-        """Receive messages with sessions, process then and forward them."""
-        async with receiver:
-            while True:
-                session_receiver = await receiver.accept_next_session()
-                logger.debug(f'Accepted session: {session_receiver.session_id}')
-                async with session_receiver:
-                    async for msg in session_receiver:
-                        try:
-                            await self.process_message(topic_name, msg, session_receiver)
-                        except Exception as e:
-                            logger.error(
-                                f'Error processing message in session {session_receiver.session_id}: {e}'
-                            )
-                            await session_receiver.abandon_message(msg)
-
-    async def process_standard_receiver(self, topic_name: str, receiver: ServiceBusReceiver):
-        """Receive messages without sessions, process then and forward them."""
-        async with receiver:
-            async for msg in receiver:
+    def process_session_receiver(self, topic_name: str, subscription_name: str, stop_event: threading.Event):
+        """Process topic/subscriptions that require a session."""
+        for session_receiver in \
+                next_available_session_receiver(self.source_client, topic_name, subscription_name, stop_event):
+            for msg in session_receiver:
+                if stop_event.is_set():
+                    break
                 try:
-                    await self.process_message(topic_name, msg, receiver)
+                    self.process_message(topic_name, msg, session_receiver)
                 except Exception as e:
-                    logger.error(f'Error processing message: {e}')
-                    await receiver.abandon_message(msg)
+                    logger.error(f'Error processing message in session {session_receiver.session.session_id}: {e}')
+                    session_receiver.abandon_message(msg)
 
-    async def receive_and_process(self, topic_name, subscription_name):
+    def process_standard_receiver(self, topic_name: str, receiver: ServiceBusReceiver, stop_event: threading.Event):
+        """Receive messages using a standard (non-session) receiver."""
+        for msg in receiver:
+            if stop_event.is_set():
+                break
+            try:
+                self.process_message(topic_name, msg, receiver)
+            except Exception as e:
+                self.logger.error(f'Error processing message: {e}')
+                receiver.abandon_message(msg)
+
+    def is_session_required(self, topic_name: str, subscription_name: str) -> bool:
+        """
+        Check if the topic/subscription combination requires a session.
+
+        Parameters
+        ----------
+        topic_name : str
+            The name of the topic.
+        subscription_name : str
+            The name of the subscription.
+
+        Returns
+        -------
+        bool
+            True if a session is required to read from this subscription.
+        """
+        for rule in self.rules:
+            if rule.source_topic == topic_name and rule.source_subscription == subscription_name:
+                if rule.requires_session:
+                    return True
+
+        return False
+
+    def receive_and_process(self, topic_name: str, subscription_name: str, stop_event: threading.Event):
         """Receive messages, process them, and forward."""
-        if not self.source_client:
-            logger.error('Source client is not initialized, cannot receive messages.')
-            return
-
-        requires_session = await self.session_is_required(topic_name, subscription_name)
-
         try:
-            if requires_session:
-                receiver = self.source_client.get_subscription_session_receiver(topic_name, subscription_name)
-                await self.process_session_receiver(topic_name, receiver)
+            # For session-enabled subscriptions, create a session-capable receiver by omitting a specific session_id.
+            if self.is_session_required(topic_name, subscription_name):
+                self.process_session_receiver(topic_name, subscription_name, stop_event)
             else:
                 receiver = self.source_client.get_subscription_receiver(topic_name, subscription_name)
-                await self.process_standard_receiver(topic_name, receiver)
+                self.process_standard_receiver(topic_name, receiver, stop_event)
         except Exception as e:
             logger.error(f'Receiver error in source namespace ({topic_name}/{subscription_name}): {e}')
 
-    async def session_is_required(self, topic_name: str, subscription_name: str) -> bool:
-        """Find if a subscription requires a session."""
-        response = False
+    def run(self):
+        """For each topic/subscription pair, run the receiver in a separate thread."""
+        stop_event = threading.Event()
+        threads = []
 
-        for rule in self.rules:
-            if rule.source_topic == topic_name and rule.source_subscription == subscription_name:
-                response = rule.requires_session
-                break
+        for topic, subs in self.input_topics.items():
+            for sub in subs:
+                thread = threading.Thread(target=self.receive_and_process, args=(topic, sub, stop_event))
+                thread.daemon = True
+                thread.start()
+                threads.append(thread)
 
-        logger.debug(f'Subscription {subscription_name} on topic {topic_name} session required {response}.')
-        return response
+        # Define signal handlers to set the stop event.
+        def shutdown_handler(signum, frame):
+            self.logger.info('Shutdown signal received. Stopping receiver threads...')
+            stop_event.set()
 
-    async def run(self):
-        """Start all receivers."""
-        receive_tasks = [
-            self.receive_and_process(topic, sub)
-            for topic, subs in self.input_topics.items()
-            for sub in subs
-        ]
-        await asyncio.gather(*receive_tasks)
+        signal.signal(signal.SIGINT, shutdown_handler)
+        signal.signal(signal.SIGTERM, shutdown_handler)
 
-    async def send_message(self, namespaces: list, topics: list, message_body: str, session_id: str = None):
+        try:
+            # Main thread waits until stop_event is set.
+            while not stop_event.is_set():
+                time.sleep(1)
+        except KeyboardInterrupt:
+            self.logger.info('Keyboard interrupt received. Shutting down...')
+            stop_event.set()
+        finally:
+            self.close()
+
+    def send_message(self, namespaces: list, topics: list, message_body: str, session_id: str = None):
         """
         Send a message to the correct namespace and topic.
 
@@ -693,15 +711,13 @@ class ServiceBusHandler:
             The topics this message should be sent to.
         message_body : str
             The body of the message to be sent.
-        session_id : str, optional
-            The session ID (default is None).
         """
         for idx, namespace_name in enumerate(namespaces):
             topic_name = topics[idx]
-            sender = await self.get_sender(namespace_name, topic_name)
-            await sender.send_messages(ServiceBusMessage(body=message_body, session_id=session_id))
+            sender = self.get_sender(namespace_name, topic_name)
+            sender.send_messages(ServiceBusMessage(body=message_body, session_id=session_id))
 
-    async def start(self):
+    def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""
         logger.debug('Creating connection for source namespace.')
         self.source_client = ServiceBusClient.from_connection_string(self.source_connection_string)
@@ -711,7 +727,7 @@ class ServiceBusHandler:
             self.clients[namespace] = ServiceBusClient.from_connection_string(conn_str)
 
 
-async def main():
+def main():
     """Configure the handler."""
     config = EnvironmentConfigParser()
     handler = ServiceBusHandler(
@@ -720,28 +736,11 @@ async def main():
         config.topics_and_subscriptions(),
         config.get_rules()
     )
-
-    try:
-        await handler.start()
-        loop = asyncio.get_running_loop()
-        stop_event = asyncio.Event()
-
-        def shutdown():
-            logger.warning('Shutdown signal received. Cleaning up...')
-            stop_event.set()
-
-        loop.add_signal_handler(signal.SIGTERM, shutdown)
-        loop.add_signal_handler(signal.SIGINT, shutdown)  # Handle CTRL+C
-
-        await handler.run()  # Start processing messages
-        await stop_event.wait()  # Wait for shutdown signal
-
-    finally:
-        await handler.close()  # Ensure all connections are properly closed
+    start_http_server(config.get_prometheus_port())
+    handler.start()
+    handler.run()
 
 
 if __name__ == '__main__':
     logger.info(f'Starting version "{__version__}".')
-    config = EnvironmentConfigParser()
-    start_http_server(config.get_prometheus_port())
-    asyncio.run(main())
+    main()

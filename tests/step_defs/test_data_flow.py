@@ -111,12 +111,12 @@ def is_message_valid(message: ServiceBusMessage, expected_body: str, topic_name:
 def _(connection_string: str, input_topic: str, output_topic: str, message_body: str):
     """The expected output message is received."""
     client = ServiceBusClient.from_connection_string(connection_string)
-    receiver = client.get_subscription_receiver(output_topic, 'test')
-
     sender = client.get_topic_sender(input_topic)
     logger.debug(f'Sending message "{message_body}" to "{input_topic}" at {time.time()}.')
-    sender.send_messages(ServiceBusMessage(body=message_body))
+    session_id = str(time.time())
+    sender.send_messages(ServiceBusMessage(body=message_body, session_id=session_id))
     sender.close()
+    receiver = client.get_subscription_receiver(output_topic, 'test')
     message_received = False
 
     for attempt in range(10):  # Retry receiving for up to 10 seconds
