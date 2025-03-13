@@ -1,6 +1,19 @@
 # Changelog
 
 
+## Unreleased
+
+### Fix
+
+* Drop async processing and dynamically handle session IDs. [Ben Dalling]
+
+* Correct documented environment variables in README.md. [Ben Dalling]
+
+### Features
+
+* Allow rules to specify that a session is required to receive messages. [Ben Dalling]
+
+
 ## 0.3.1 (2025-03-07)
 
 ### Fix
