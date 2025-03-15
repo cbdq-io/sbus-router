@@ -589,7 +589,8 @@ class ServiceBusHandler:
             if is_match:
                 try:
                     logger.debug(f'Successfully matched message to {rule.name()}.')
-                    await self.send_message(destination_namespaces, destination_topics, message_body)
+                    await self.send_message(destination_namespaces, destination_topics, message_body,
+                                            message.application_properties)
                     await receiver.complete_message(message)
                     return
                 except Exception as e:
@@ -638,7 +639,7 @@ class ServiceBusHandler:
 
         await asyncio.gather(*receive_tasks)
 
-    async def send_message(self, namespaces: list, topics: list, message_body: str):
+    async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict):
         """
         Send a message to the correct namespace and topic.
 
@@ -650,11 +651,14 @@ class ServiceBusHandler:
             The topics this message should be sent to.
         message_body : str
             The body of the message to be sent.
+        application_properties : dict
+            The application properties of the original message.
         """
         for idx, namespace_name in enumerate(namespaces):
             topic_name = topics[idx]
             sender = await self.get_sender(namespace_name, topic_name)
-            await sender.send_messages(ServiceBusMessage(body=message_body))
+            await sender.send_messages(ServiceBusMessage(body=message_body,
+                                                         application_properties=application_properties))
 
     async def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""
