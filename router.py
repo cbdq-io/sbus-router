@@ -486,21 +486,24 @@ class EnvironmentConfigParser:
 
         return response
 
-    def topics_and_subscriptions(self) -> dict:
+    def topics_and_subscriptions(self) -> list[tuple]:
         """
         Extract a dictionary of the source topics and subscriptions.
 
         Returns
         -------
-        dict
-            A dictionary with the topic name as the key and the subscriptions
-            as a value.
+        list[tuple]
+            A list of tuples.  Each tuple contains two elements.  The first
+            is the topic name, the second is the subscription name.
         """
-        response = {}
+        response = []
         rules = self.get_rules()
 
         for rule in rules:
-            response[rule.source_topic] = [rule.source_subscription]
+            instance = (rule.source_topic, rule.source_subscription)
+
+            if instance not in response:
+                response.append(instance)
 
         return response
 
@@ -628,11 +631,11 @@ class ServiceBusHandler:
 
     async def run(self):
         """Start all receivers."""
-        receive_tasks = [
-            self.receive_and_process(topic, sub)
-            for topic, subs in self.input_topics.items()
-            for sub in subs
-        ]
+        receive_tasks = []
+
+        for topic, subscription in self.input_topics:
+            receive_tasks.append(self.receive_and_process(topic, subscription))
+
         await asyncio.gather(*receive_tasks)
 
     async def send_message(self, namespaces: list, topics: list, message_body: str):
