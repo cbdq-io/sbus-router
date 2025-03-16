@@ -5,6 +5,8 @@
 
 ### Fix
 
+* Ensure message properties are preserved during routing. [Ben Dalling]
+
 * Ensure receivers are created for unique topic/subscription combinations. [Ben Dalling]
 
 
