@@ -34,6 +34,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 import asyncio
+import importlib
 import json
 import logging
 import os
@@ -79,6 +80,15 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
 
 logging.basicConfig()
 logger = get_logger(__file__)
+custom_sender_string = os.getenv('ROUTER_CUSTOM_SENDER')
+
+if custom_sender_string:
+    logger.info(f'Configuring custom sender "{custom_sender_string}".')
+    module_path, func_name = custom_sender_string.split(':')
+    module = importlib.import_module(module_path)
+    custom_sender = getattr(module, func_name)
+else:
+    custom_sender = None
 
 
 async def extract_message_body(message: ServiceBusMessage) -> str:
@@ -657,8 +667,11 @@ class ServiceBusHandler:
         for idx, namespace_name in enumerate(namespaces):
             topic_name = topics[idx]
             sender = await self.get_sender(namespace_name, topic_name)
-            await sender.send_messages(ServiceBusMessage(body=message_body,
-                                                         application_properties=application_properties))
+
+            if custom_sender:
+                await custom_sender(sender, topic_name, message_body, application_properties)
+            else:
+                await sender.send_messages(message_body, application_properties=application_properties)
 
     async def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""

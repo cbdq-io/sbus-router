@@ -18,6 +18,7 @@ RUN apt-get update \
 
 USER appuser
 WORKDIR /home/appuser
+ENV PYTHONPATH=/home/appuser
 
 COPY --chown=appuser:appuser requirements.txt /home/appuser/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt --user
