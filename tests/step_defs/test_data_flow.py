@@ -8,9 +8,9 @@ from azure.servicebus import ServiceBusClient, ServiceBusMessage
 from azure.servicebus.amqp import AmqpMessageBodyType
 from pytest_bdd import given, parsers, scenario, then, when
 
-from router import get_logger
+import router
 
-logger = get_logger(__name__, logging.DEBUG)
+logger = router.get_logger(__name__, logging.DEBUG)
 
 
 @scenario('data-flow.feature', 'Inject a Message and Confirm the Destination')
@@ -111,13 +111,21 @@ def is_message_valid(message: ServiceBusMessage, expected_body: str, topic_name:
 def _(connection_string: str, input_topic: str, output_topic: str, message_body: str):
     """The expected output message is received."""
     client = ServiceBusClient.from_connection_string(connection_string)
-    receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=1)
-
     sender = client.get_topic_sender(input_topic)
     logger.debug(f'Sending message "{message_body}" to "{input_topic}" at {time.time()}.')
     sender.send_messages(ServiceBusMessage(body=message_body))
     sender.close()
     message_received = False
+
+    if output_topic == 'ie.topic':
+        receiver = client.get_subscription_receiver(
+            output_topic,
+            'test',
+            max_wait_time=1,
+            session_id='0'
+        )
+    else:
+        receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=1)
 
     for message in receiver:
         logger.debug(f'Message received: "{str(message.body)}" of type "{message.body_type}".')
