@@ -1,6 +1,15 @@
 # Changelog
 
 
+## Unreleased
+
+### Fix
+
+* Ensure message properties are preserved during routing. [Ben Dalling]
+
+* Ensure receivers are created for unique topic/subscription combinations. [Ben Dalling]
+
+
 ## 0.3.1 (2025-03-07)
 
 ### Fix

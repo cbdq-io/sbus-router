@@ -111,7 +111,7 @@ def is_message_valid(message: ServiceBusMessage, expected_body: str, topic_name:
 def _(connection_string: str, input_topic: str, output_topic: str, message_body: str):
     """The expected output message is received."""
     client = ServiceBusClient.from_connection_string(connection_string)
-    receiver = client.get_subscription_receiver(output_topic, 'test')
+    receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=1)
 
     sender = client.get_topic_sender(input_topic)
     logger.debug(f'Sending message "{message_body}" to "{input_topic}" at {time.time()}.')
@@ -119,20 +119,10 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
     sender.close()
     message_received = False
 
-    for attempt in range(10):  # Retry receiving for up to 10 seconds
-        logger.debug(f'Attempt {attempt + 1} to receive message from "{output_topic}".')
-        messages = receiver.receive_messages(max_wait_time=1)
-        logger.debug(f'Received messages "{type(messages)}" -> "{messages}" {len(messages)}.')
-
-        if len(messages) == 0:
-            logger.warning(f'Receive attempt {attempt + 1} timed out.')
-            continue
-
-        message = messages[0]
+    for message in receiver:
         logger.debug(f'Message received: "{str(message.body)}" of type "{message.body_type}".')
         receiver.complete_message(message)
         message_received = True
-        break
 
     receiver.close()
     client.close()
