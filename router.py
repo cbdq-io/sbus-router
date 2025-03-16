@@ -34,6 +34,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 import asyncio
+import importlib
 import json
 import logging
 import os
@@ -50,7 +51,7 @@ from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver
 from azure.servicebus.amqp import AmqpMessageBodyType
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '0.3.1'
+__version__ = '0.4.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -79,6 +80,15 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
 
 logging.basicConfig()
 logger = get_logger(__file__)
+custom_sender_string = os.getenv('ROUTER_CUSTOM_SENDER')
+
+if custom_sender_string:
+    logger.info(f'Configuring custom sender "{custom_sender_string}".')
+    module_path, func_name = custom_sender_string.split(':')
+    module = importlib.import_module(module_path)
+    custom_sender = getattr(module, func_name)
+else:
+    custom_sender = None
 
 
 async def extract_message_body(message: ServiceBusMessage) -> str:
@@ -486,21 +496,24 @@ class EnvironmentConfigParser:
 
         return response
 
-    def topics_and_subscriptions(self) -> dict:
+    def topics_and_subscriptions(self) -> list[tuple]:
         """
         Extract a dictionary of the source topics and subscriptions.
 
         Returns
         -------
-        dict
-            A dictionary with the topic name as the key and the subscriptions
-            as a value.
+        list[tuple]
+            A list of tuples.  Each tuple contains two elements.  The first
+            is the topic name, the second is the subscription name.
         """
-        response = {}
+        response = []
         rules = self.get_rules()
 
         for rule in rules:
-            response[rule.source_topic] = [rule.source_subscription]
+            instance = (rule.source_topic, rule.source_subscription)
+
+            if instance not in response:
+                response.append(instance)
 
         return response
 
@@ -586,7 +599,8 @@ class ServiceBusHandler:
             if is_match:
                 try:
                     logger.debug(f'Successfully matched message to {rule.name()}.')
-                    await self.send_message(destination_namespaces, destination_topics, message_body)
+                    await self.send_message(destination_namespaces, destination_topics, message_body,
+                                            message.application_properties)
                     await receiver.complete_message(message)
                     return
                 except Exception as e:
@@ -628,14 +642,14 @@ class ServiceBusHandler:
 
     async def run(self):
         """Start all receivers."""
-        receive_tasks = [
-            self.receive_and_process(topic, sub)
-            for topic, subs in self.input_topics.items()
-            for sub in subs
-        ]
+        receive_tasks = []
+
+        for topic, subscription in self.input_topics:
+            receive_tasks.append(self.receive_and_process(topic, subscription))
+
         await asyncio.gather(*receive_tasks)
 
-    async def send_message(self, namespaces: list, topics: list, message_body: str):
+    async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict):
         """
         Send a message to the correct namespace and topic.
 
@@ -647,11 +661,17 @@ class ServiceBusHandler:
             The topics this message should be sent to.
         message_body : str
             The body of the message to be sent.
+        application_properties : dict
+            The application properties of the original message.
         """
         for idx, namespace_name in enumerate(namespaces):
             topic_name = topics[idx]
             sender = await self.get_sender(namespace_name, topic_name)
-            await sender.send_messages(ServiceBusMessage(body=message_body))
+
+            if custom_sender:
+                await custom_sender(sender, topic_name, message_body, application_properties)
+            else:
+                await sender.send_messages(message_body, application_properties=application_properties)
 
     async def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""

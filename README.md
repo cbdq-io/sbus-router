@@ -10,8 +10,7 @@ least one rule configured  (see below).
 | Environment Variable | Required | Default | Description |
 | -------------------- | -------- | ------- | ----------- |
 | LOG_LEVEL | | WARN | The log level for the router.|
-| ROUTER_ALLOWED_SASL_MECHS | | None | A space limited list of allowed SASL mechanisms.  See <https://qpid.apache.org/releases/qpid-proton-0.38.0/proton/python/docs/proton.html?highlight=allowed_mechs#proton.SASL.allowed_mechs>. |
-| ROUTER_DLQ_TOPIC | Yes | | The name of a topic to route messages that no rules match. |
+| ROUTER_CUSTOM_SENDER | No | N/A | See below. |
 | ROUTER_SOURCE_CONNECTION_STRING | Yes | | The connection string for the source Service Bus namespace. |
 
 ## Rules
@@ -52,3 +51,22 @@ Destination namespaces are defined with a prefix of `ROUTER_NAMESPACE_` and
 a suffix of `_CONNECTION_STRING`.  For example, if an environment variable
 called `ROUTER_NAMESPACE_IE_CONNECTION_STRING` is set, then a destination
 namespace of `IE` can be referred to in the rules.
+
+## Using a Custom Sender
+
+The environment variable `ROUTER_CUSTOM_SENDER` can be set tto configure a
+custom sender.  `ROUTER_CUSTOM_SENDER` must be a colon (`:`) separated
+value of two items where the first item is the path to a Python script and
+the second is the name of a function in the Python script to be called
+(e.g. `custom:custom_sender` will call a function called `custom_sender`
+in a script called `custom.py`).  The defined function MUST be defined
+as an async function and MUST use `await` on any calls that will incure
+I/O.  The function MUST be defined to accept the following arguments:
+
+| Name                   | Type                                  | Description                                         |
+| sender                 | azure.servicebus.aio.ServiceBusSender | The sender for the destination topic.               |
+| message_body           | str or Bytes                          | The body of the message to be sent.                 |
+| application_properties | dict or None                          | Any properties that were set on the source message. |
+
+An example custom sender is implemented in the file
+`tests/resources/custom.py`.

@@ -5,6 +5,19 @@
 
 ### Fix
 
+* Ensure message properties are preserved during routing. [Ben Dalling]
+
+* Ensure receivers are created for unique topic/subscription combinations. [Ben Dalling]
+
+### Features
+
+* Add the ability to set a hook for a custom sender. [Ben Dalling]
+
+
+## 0.3.1 (2025-03-07)
+
+### Fix
+
 * Separate the sender and receiver namespaces. [Ben Dalling]
 
 * Add a metadata description to the image. [Ben Dalling]
