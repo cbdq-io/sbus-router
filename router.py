@@ -46,8 +46,8 @@ from string import Template
 import jmespath
 import jsonschema
 import jsonschema.exceptions
-from azure.servicebus import ServiceBusMessage
-from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver
+from azure.servicebus import ServiceBusMessage, NEXT_AVAILABLE_SESSION, ServiceBusReceivedMessage
+from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver, AutoLockRenewer
 from azure.servicebus.amqp import AmqpMessageBodyType
 from prometheus_client import Counter, Summary, start_http_server
 
@@ -575,7 +575,7 @@ class ServiceBusHandler:
         return self.senders[(namespace, topic)]
 
     @PROCESSING_TIME.time()
-    async def process_message(self, source_topic: str, message: ServiceBusMessage, receiver: ServiceBusReceiver):
+    async def process_message(self, source_topic: str, message: ServiceBusReceivedMessage, receiver: ServiceBusReceiver):
         """
         Process the received message asynchronously.
 
@@ -628,24 +628,28 @@ class ServiceBusHandler:
             logger.error('Source client is not initialized, cannot receive messages.')
             return
 
-        try:
-            receiver = self.source_client.get_subscription_receiver(topic_name, subscription_name)
-            async with receiver:
-                async for msg in receiver:
-                    try:
-                        await self.process_message(topic_name, msg, receiver)
-                    except Exception as e:
-                        logger.error(f'Error processing message: {e}')
-                        await receiver.abandon_message(msg)
-        except Exception as e:
-            logger.error(f'Receiver error in source namespace: {e}')
+        while True:
+            try:
+                async with self.source_client.get_subscription_receiver(topic_name, subscription_name, session_id=NEXT_AVAILABLE_SESSION, max_wait_time=5, auto_lock_renewer=AutoLockRenewer()) as receiver:
+                    if receiver.session is None:
+                        logger.info("No session was available to assign. Retrying")
+                        continue
+                    async for msg in receiver:
+                        try:
+                            await self.process_message(topic_name, msg, receiver)
+                        except Exception as e:
+                            logger.error(f'Error processing message: {e}')
+                            await receiver.abandon_message(msg)
+            except Exception as e:
+                logger.error(f'Receiver error in source namespace: {e}')
 
     async def run(self):
         """Start all receivers."""
         receive_tasks = []
 
         for topic, subscription in self.input_topics:
-            receive_tasks.append(self.receive_and_process(topic, subscription))
+            for i in range(0, 10):
+                receive_tasks.append(self.receive_and_process(topic, subscription))
 
         await asyncio.gather(*receive_tasks)
 
