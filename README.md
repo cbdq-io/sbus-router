@@ -11,6 +11,7 @@ least one rule configured  (see below).
 | -------------------- | -------- | ------- | ----------- |
 | LOG_LEVEL | | WARN | The log level for the router.|
 | ROUTER_CUSTOM_SENDER | No | N/A | See below. |
+| ROUTER_MAX_TASKS | No | 1 | The number of tasks to allocate to each topic/subscription. |
 | ROUTER_SOURCE_CONNECTION_STRING | Yes | | The connection string for the source Service Bus namespace. |
 
 ## Rules
@@ -32,6 +33,7 @@ The configurable fields for rules are:
   considered valid, not be produced onto the DLQ, but will be dropped.
   Topics can be comma separated which means that the messages that match
   the rule will be sent to each of the topics.
+- `is_session_required`: Does the source subscription require sessions?
 - `jmespath`: A [JMESPath](https://jmespath.org/) expression to query an
   element within the JSON contained in the message.
 - `regexp`: A
