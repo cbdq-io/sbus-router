@@ -17,6 +17,8 @@ Feature: Environment Configuration Parser
     Scenario Outline: EnvironmentConfigParser Methods
         Given an Environment Dictionary
         When the environment variable <key> has a value of <value>
+        And the environment variable ROUTER_NAMESPACE_IE_CONNECTION_STRING has a value of Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;
+        And the environment variable ROUTER_SOURCE_CONNECTION_STRING has a value of Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;
         Then the EnvironmentConfigParser method <method_name> returns <value>
 
         Examples:

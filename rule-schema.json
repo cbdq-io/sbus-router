@@ -26,6 +26,11 @@
       "description": "The topics (comma separated) to which data will be sent.",
       "type": "string"
     },
+    "is_session_required": {
+      "default": false,
+      "description": "Are sessions required for the source subscription?",
+      "type": "boolean"
+    },
     "jmespath": {
       "description": "A JMESPath expression used for querying data.",
       "type": "string"

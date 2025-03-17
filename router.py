@@ -46,9 +46,12 @@ from string import Template
 import jmespath
 import jsonschema
 import jsonschema.exceptions
-from azure.servicebus import ServiceBusMessage
-from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver
+from azure.servicebus import (NEXT_AVAILABLE_SESSION, ServiceBusMessage,
+                              ServiceBusReceivedMessage)
+from azure.servicebus.aio import (AutoLockRenewer, ServiceBusClient,
+                                  ServiceBusReceiver)
 from azure.servicebus.amqp import AmqpMessageBodyType
+from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
 __version__ = '0.4.0'
@@ -78,7 +81,7 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
     return logger
 
 
-logging.basicConfig()
+logging.basicConfig(format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
 logger = get_logger(__file__)
 custom_sender_string = os.getenv('ROUTER_CUSTOM_SENDER')
 
@@ -171,6 +174,7 @@ class RouterRule:
         else:
             self.destination_topics = []
 
+        self.is_session_required = parsed_definition.get('is_session_required', False)
         self.jmespath = parsed_definition.get('jmespath', None)
         self.regexp = parsed_definition.get('regexp', None)
         self.source_subscription = parsed_definition['source_subscription']
@@ -465,6 +469,10 @@ class EnvironmentConfigParser:
         """Get the connection string of the source namespace."""
         return self._environ['ROUTER_SOURCE_CONNECTION_STRING']
 
+    def max_tasks(self) -> int:
+        """Get the max number of tasks per source subscription."""
+        return int(self._environ.get('ROUTER_MAX_TASKS', '1'))
+
     def service_bus_namespaces(self) -> ServiceBusNamespaces:
         """
         Get the Service Bus namespaces as defined in the environment.
@@ -524,21 +532,16 @@ class ServiceBusHandler:
 
     Parameters
     ----------
-    str : source_connection_string
-        The connection string of the source namespace.
-    dict : namespaces
-        The destination namespaces.
-    dict : input_topics
-        The source topics and their associated subscriptions.
-    list[RouterRule] : rules
-        The rules to test the messages against.
+    config : EnvironmentConfigParser
+        The configuration as set by environment variables.
     """
 
-    def __init__(self, source_connection_string: str, namespaces: dict, input_topics: dict, rules: list[RouterRule]):
-        self.source_connection_string = source_connection_string
-        self.namespaces = namespaces  # Used for sending, not receiving
-        self.input_topics = input_topics
-        self.rules = rules
+    def __init__(self, config: EnvironmentConfigParser):
+        self.source_connection_string = config.get_source_connection_string()
+        self.namespaces = config.service_bus_namespaces().get_all_namespaces()  # Used for sending, not receiving
+        self.input_topics = config.topics_and_subscriptions()
+        self.rules = config.get_rules()
+        self.max_tasks = config.max_tasks()
 
         for idx, rule in enumerate(self.rules):
             logger.info(f'Rule parsing order {idx} {rule.name()}')
@@ -546,6 +549,7 @@ class ServiceBusHandler:
         self.source_client = None  # Used for receiving
         self.clients = {}  # Used for sending
         self.senders = {}
+        self.lock_renewer = AutoLockRenewer()
 
     async def close(self):
         """Gracefully close all clients and senders."""
@@ -554,6 +558,26 @@ class ServiceBusHandler:
         await asyncio.gather(*(client.close() for client in self.clients.values()))
         if self.source_client:
             await self.source_client.close()
+
+    async def get_receiver(self, topic_name: str, subscription_name: str) -> ServiceBusReceiver:
+        """Get a receiver for a topic/subscription."""
+        if self.is_session_required(topic_name, subscription_name):
+            receiver = self.source_client.get_subscription_receiver(
+                topic_name=topic_name,
+                subscription_name=subscription_name,
+                session_id=NEXT_AVAILABLE_SESSION,
+                auto_lock_renewer=self.lock_renewer,
+                max_wait_time=5
+            )
+            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
+        else:
+            logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
+            receiver = self.source_client.get_subscription_receiver(
+                topic_name=topic_name,
+                subscription_name=subscription_name
+            )
+
+        return receiver
 
     async def get_sender(self, namespace: str, topic: str):
         """
@@ -574,8 +598,17 @@ class ServiceBusHandler:
             self.senders[(namespace, topic)] = client.get_topic_sender(topic)
         return self.senders[(namespace, topic)]
 
+    def is_session_required(self, source_topic: str, source_subscription: str) -> bool:
+        """Check if a source topic/subscription requires sessions or not."""
+        for rule in self.rules:
+            if rule.source_topic == source_topic and rule.source_subscription == source_subscription:
+                return rule.is_session_required
+
+        return False
+
     @PROCESSING_TIME.time()
-    async def process_message(self, source_topic: str, message: ServiceBusMessage, receiver: ServiceBusReceiver):
+    async def process_message(self, source_topic: str, message: ServiceBusReceivedMessage,
+                              receiver: ServiceBusReceiver):
         """
         Process the received message asynchronously.
 
@@ -628,24 +661,27 @@ class ServiceBusHandler:
             logger.error('Source client is not initialized, cannot receive messages.')
             return
 
-        try:
-            receiver = self.source_client.get_subscription_receiver(topic_name, subscription_name)
-            async with receiver:
-                async for msg in receiver:
-                    try:
-                        await self.process_message(topic_name, msg, receiver)
-                    except Exception as e:
-                        logger.error(f'Error processing message: {e}')
-                        await receiver.abandon_message(msg)
-        except Exception as e:
-            logger.error(f'Receiver error in source namespace: {e}')
+        while True:
+            try:
+                async with await self.get_receiver(topic_name, subscription_name) as receiver:
+                    async for message in receiver:
+                        await self.process_message(
+                            topic_name,
+                            message,
+                            receiver,
+                        )
+            except OperationTimeoutError:
+                logger.debug(f'Timed out on {topic_name}/{subscription_name}.')
+            except Exception as e:
+                logger.error(f'Unknown exception {e} on {topic_name}/{subscription_name}.')
 
     async def run(self):
         """Start all receivers."""
         receive_tasks = []
 
         for topic, subscription in self.input_topics:
-            receive_tasks.append(self.receive_and_process(topic, subscription))
+            for i in range(0, self.max_tasks):
+                receive_tasks.append(self.receive_and_process(topic, subscription))
 
         await asyncio.gather(*receive_tasks)
 
@@ -685,13 +721,7 @@ class ServiceBusHandler:
 
 async def main():
     """Configure the handler."""
-    config = EnvironmentConfigParser()
-    handler = ServiceBusHandler(
-        config.get_source_connection_string(),
-        config.service_bus_namespaces().get_all_namespaces(),
-        config.topics_and_subscriptions(),
-        config.get_rules()
-    )
+    handler = ServiceBusHandler(EnvironmentConfigParser())
 
     try:
         await handler.start()
