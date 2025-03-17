@@ -81,7 +81,7 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
     return logger
 
 
-logging.basicConfig()
+logging.basicConfig(format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
 logger = get_logger(__file__)
 custom_sender_string = os.getenv('ROUTER_CUSTOM_SENDER')
 
@@ -663,20 +663,17 @@ class ServiceBusHandler:
 
         while True:
             try:
-                receiver = await self.get_receiver(topic_name, subscription_name)
-
-                async for message in receiver:
-                    await self.process_message(
-                        topic_name,
-                        message,
-                        receiver,
-                    )
+                async with await self.get_receiver(topic_name, subscription_name) as receiver:
+                    async for message in receiver:
+                        await self.process_message(
+                            topic_name,
+                            message,
+                            receiver,
+                        )
             except OperationTimeoutError:
                 logger.debug(f'Timed out on {topic_name}/{subscription_name}.')
-                continue
-
-            logger.debug(f'Closing receiver for {topic_name}/{subscription_name}...')
-            await receiver.close()
+            except Exception as e:
+                logger.error(f'Unknown exception {e} on {topic_name}/{subscription_name}.')
 
     async def run(self):
         """Start all receivers."""
