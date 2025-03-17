@@ -5,6 +5,15 @@
 
 ### Fix
 
+* Add health check to the container image. [Ben Dalling]
+
+* Implement suggestions of Sam M of PremFina. [Ben Dalling]
+
+
+## 0.4.0 (2025-03-16)
+
+### Fix
+
 * Ensure message properties are preserved during routing. [Ben Dalling]
 
 * Ensure receivers are created for unique topic/subscription combinations. [Ben Dalling]

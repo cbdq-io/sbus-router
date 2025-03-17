@@ -62,7 +62,7 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
     if output_topic in none_destination_topics:
         client = ServiceBusClient.from_connection_string(connection_string)
         sender = client.get_topic_sender(input_topic)
-        sender.send_messages(ServiceBusMessage(body=message_body))
+        sender.send_messages(ServiceBusMessage(body=message_body, session_id='0'))
         pytest.skip(f'Output topic is "{output_topic}".')
 
 
@@ -113,7 +113,7 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
     client = ServiceBusClient.from_connection_string(connection_string)
     sender = client.get_topic_sender(input_topic)
     logger.debug(f'Sending message "{message_body}" to "{input_topic}" at {time.time()}.')
-    sender.send_messages(ServiceBusMessage(body=message_body))
+    sender.send_messages(ServiceBusMessage(body=message_body, session_id='0'))
     sender.close()
     message_received = False
 
@@ -121,11 +121,11 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
         receiver = client.get_subscription_receiver(
             output_topic,
             'test',
-            max_wait_time=1,
+            max_wait_time=5,
             session_id='0'
         )
     else:
-        receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=1)
+        receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=5)
 
     for message in receiver:
         logger.debug(f'Message received: "{str(message.body)}" of type "{message.body_type}".')

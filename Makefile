@@ -17,6 +17,7 @@ lint:
 	yamllint -s .
 	isort .
 	flake8
+	bandit -qr .
 	docker run --rm -i hadolint/hadolint < Dockerfile
 
 tag:

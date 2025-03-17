@@ -18,7 +18,9 @@ RUN apt-get update \
 
 USER appuser
 WORKDIR /home/appuser
+ENV ROUTER_PROMETHEUS_PORT=8000
 ENV PYTHONPATH=/home/appuser
+HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 CMD [ "/bin/sh", "-c", "curl --fail localhost:${ROUTER_PROMETHEUS_PORT}" ]
 
 COPY --chown=appuser:appuser requirements.txt /home/appuser/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt --user
