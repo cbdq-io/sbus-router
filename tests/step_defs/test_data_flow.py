@@ -121,11 +121,11 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
         receiver = client.get_subscription_receiver(
             output_topic,
             'test',
-            max_wait_time=1,
+            max_wait_time=5,
             session_id='0'
         )
     else:
-        receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=1)
+        receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=5)
 
     for message in receiver:
         logger.debug(f'Message received: "{str(message.body)}" of type "{message.body_type}".')
