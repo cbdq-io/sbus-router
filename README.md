@@ -12,6 +12,7 @@ least one rule configured  (see below).
 | LOG_LEVEL | | WARN | The log level for the router.|
 | ROUTER_CUSTOM_SENDER | No | N/A | See below. |
 | ROUTER_MAX_TASKS | No | 1 | The number of tasks to allocate to each topic/subscription. |
+| ROUTER_PROMETHEUS_PORT | No | 8000 | The port for Prometheus to start on. |
 | ROUTER_SOURCE_CONNECTION_STRING | Yes | | The connection string for the source Service Bus namespace. |
 
 ## Rules
