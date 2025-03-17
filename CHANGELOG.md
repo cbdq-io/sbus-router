@@ -5,6 +5,8 @@
 
 ### Fix
 
+* Add health check to the container image. [Ben Dalling]
+
 * Implement suggestions of Sam M of PremFina. [Ben Dalling]
 
 
