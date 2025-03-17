@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Fix
+
+* Implement suggestions of Sam M of PremFina. [Ben Dalling]
+
+
 ## 0.4.0 (2025-03-16)
 
 ### Fix
