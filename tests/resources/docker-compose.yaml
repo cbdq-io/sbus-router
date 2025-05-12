@@ -26,6 +26,7 @@ services:
       ISO_3166_1_ALPHA_2: FR
       LOG_LEVEL: DEBUG
       ROUTER_CUSTOM_SENDER: "custom:custom_sender"
+      ROUTER_MAX_SESSIONS: 2
       ROUTER_NAMESPACE_GB_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ROUTER_NAMESPACE_IE_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ROUTER_RULE_COUNTRY_FR: '{ "destination_namespaces": "", "destination_topics": "", "jmespath": "country", "regexp": "^$$ISO_3166_1_ALPHA_2$", "source_subscription": "test", "source_topic": "topic.1"}'
