@@ -41,6 +41,7 @@ import os
 import re
 import signal
 import sys
+from collections import defaultdict
 from string import Template
 
 import jmespath
@@ -550,6 +551,7 @@ class ServiceBusHandler:
         self.clients = {}  # Used for sending
         self.senders = {}
         self.lock_renewer = AutoLockRenewer()
+        self.sender_locks = defaultdict(asyncio.Lock)
 
     async def close(self):
         """Gracefully close all clients and senders."""
@@ -590,13 +592,21 @@ class ServiceBusHandler:
         topic : str
             The name of the destination topic.
         """
-        if (namespace, topic) not in self.senders:
-            logger.debug(f'Creating a sender for {namespace}/{topic}.')
-            client = self.clients.get(namespace)
-            if not client:
-                raise ValueError(f'Namespace "{namespace}" not found in configuration.')
-            self.senders[(namespace, topic)] = client.get_topic_sender(topic)
-        return self.senders[(namespace, topic)]
+        key = (namespace, topic)
+
+        async with self.sender_locks[key]:
+            if key not in self.senders:
+                logger.debug(f'Creating a sender for {namespace}/{topic}.')
+                client = self.clients.get(namespace)
+
+                if not client:
+                    raise ValueError(f'Namespace "{namespace}" not found in configuration.')
+
+                sender = client.get_topic_sender(topic)
+                await sender.__aenter__()
+                self.senders[key] = sender
+
+            return self.senders[key]
 
     def is_session_required(self, source_topic: str, source_subscription: str) -> bool:
         """Check if a source topic/subscription requires sessions or not."""

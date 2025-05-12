@@ -1,6 +1,21 @@
 # Changelog
 
 
+## Unreleased
+
+### Fix
+
+* Make the get_sender method of the handler thread safe. [Ben Dalling]
+
+* Remove python-qpid-proton from the artefact. [Ben Dalling]
+
+### Other
+
+* Ci: On push to develop, publish a "latest" artefact. [Ben Dalling]
+
+* Ci: Periodically run Trivy against the latest released container image. [Ben Dalling]
+
+
 ## 0.5.0 (2025-03-17)
 
 ### Fix
