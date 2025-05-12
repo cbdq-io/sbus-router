@@ -5,6 +5,8 @@
 
 ### Fix
 
+* Correct the container image description. [Ben Dalling]
+
 * Make the get_sender method of the handler thread safe. [Ben Dalling]
 
 * Remove python-qpid-proton from the artefact. [Ben Dalling]
