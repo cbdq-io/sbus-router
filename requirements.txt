@@ -3,4 +3,3 @@ azure-servicebus
 jmespath
 jsonschema
 prometheus-client
-python-qpid-proton
