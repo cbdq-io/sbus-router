@@ -543,6 +543,7 @@ class ServiceBusHandler:
         self.input_topics = config.topics_and_subscriptions()
         self.rules = config.get_rules()
         self.max_tasks = config.max_tasks()
+        logger.info(f'Starting {self.max_tasks} task(s) per subscription.')
 
         for idx, rule in enumerate(self.rules):
             logger.info(f'Rule parsing order {idx} {rule.name()}')
@@ -595,18 +596,28 @@ class ServiceBusHandler:
         key = (namespace, topic)
 
         async with self.sender_locks[key]:
-            if key not in self.senders:
-                logger.debug(f'Creating a sender for {namespace}/{topic}.')
-                client = self.clients.get(namespace)
+            sender = self.senders.get(key)
 
-                if not client:
-                    raise ValueError(f'Namespace "{namespace}" not found in configuration.')
+            if sender is not None:
+                return sender
 
-                sender = client.get_topic_sender(topic)
-                await sender.__aenter__()
-                self.senders[key] = sender
+            logger.debug(f'Creating a new sender for {namespace}/{topic}.')
+            client = self.clients.get(namespace)
 
-            return self.senders[key]
+            if not client:
+                raise ValueError(f'Namespace "{namespace}" not found in configuration.')
+
+            sender = client.get_topic_sender(topic)
+
+            try:
+                await sender.__aenter__()  # Initialize sender
+            except Exception as e:
+                logger.error(f'Failed to enter sender context for {namespace}/{topic}: {e}')
+                raise
+
+            # Only store the sender after successful init
+            self.senders[key] = sender
+            return sender
 
     def is_session_required(self, source_topic: str, source_subscription: str) -> bool:
         """Check if a source topic/subscription requires sessions or not."""
