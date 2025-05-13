@@ -178,6 +178,12 @@ class RouterRule:
         self.is_session_required = parsed_definition.get('is_session_required', False)
         self.jmespath = parsed_definition.get('jmespath', None)
         self.regexp = parsed_definition.get('regexp', None)
+
+        if self.regexp:
+            self.prog = re.compile(self.regexp)
+        else:
+            self.prog = None
+
         self.source_subscription = parsed_definition['source_subscription']
         self.source_topic = parsed_definition['source_topic']
         self.parsed_definition = parsed_definition
@@ -252,9 +258,7 @@ class RouterRule:
             True if the message matches, otherwise False.
         """
         data = self.get_data(message_body)
-        prog = re.compile(self.regexp)
-
-        return any(prog.search(element) for element in data) if data else False
+        return any(self.prog.search(element) for element in data) if data else False
 
     def is_match(self, source_topic_name: str, message_body: str) -> tuple:
         """
@@ -553,6 +557,11 @@ class ServiceBusHandler:
         self.senders = {}
         self.lock_renewer = AutoLockRenewer()
         self.sender_locks = defaultdict(asyncio.Lock)
+        self.sender_send_locks = defaultdict(asyncio.Lock)
+        self.rules_by_topic = defaultdict(list)
+
+        for rule in self.rules:
+            self.rules_by_topic[rule.source_topic].append(rule)
 
     async def close(self):
         """Gracefully close all clients and senders."""
@@ -570,7 +579,9 @@ class ServiceBusHandler:
                 subscription_name=subscription_name,
                 session_id=NEXT_AVAILABLE_SESSION,
                 auto_lock_renewer=self.lock_renewer,
-                max_wait_time=5
+                max_auto_renew_duration=300,
+                max_wait_time=5,
+                prefetch_count=20
             )
             logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
         else:
@@ -644,7 +655,7 @@ class ServiceBusHandler:
         """
         message_body = await extract_message_body(message)
 
-        for rule in self.rules:
+        for rule in self.rules_by_topic.get(source_topic, []):
             is_match, destination_namespaces, destination_topics = rule.is_match(
                 source_topic,
                 message_body
@@ -702,7 +713,8 @@ class ServiceBusHandler:
 
         for topic, subscription in self.input_topics:
             for i in range(0, self.max_tasks):
-                receive_tasks.append(self.receive_and_process(topic, subscription))
+                task = asyncio.create_task(self.receive_and_process(topic, subscription))
+                receive_tasks.append(task)
 
         await asyncio.gather(*receive_tasks)
 
@@ -723,12 +735,18 @@ class ServiceBusHandler:
         """
         for idx, namespace_name in enumerate(namespaces):
             topic_name = topics[idx]
+            key = (namespace_name, topic_name)
             sender = await self.get_sender(namespace_name, topic_name)
 
-            if custom_sender:
-                await custom_sender(sender, topic_name, message_body, application_properties)
-            else:
-                await sender.send_messages(message_body, application_properties=application_properties)
+            async with self.sender_send_locks[key]:
+                try:
+                    if custom_sender:
+                        await custom_sender(sender, topic_name, message_body, application_properties)
+                    else:
+                        await sender.send_messages(message_body, application_properties=application_properties)
+                except Exception as e:
+                    logger.error(f'Failed to send message with sender {key}: {e}')
+                    raise
 
     async def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""
