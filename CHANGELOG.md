@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Fix
+
+* If a message is sent do the DLQ, do not include the message body in the custom properties. [Ben Dalling]
+
+
 ## 0.5.1 (2025-05-13)
 
 ### Fix
