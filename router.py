@@ -6,7 +6,7 @@ LICENCE
 -------
 BSD 3-Clause License
 
-Copyright (c) 2024, Cloud Based DQ Ltd.
+Copyright (c) 2024,2025, Cloud Based DQ Ltd.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -55,7 +55,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '0.5.1'
+__version__ = '0.5.2'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -679,7 +679,7 @@ class ServiceBusHandler:
         try:
             await receiver.dead_letter_message(
                 reason='No rules match this message.',
-                error_description=f'Message {message_body} could not be processed.',
+                error_description='No rules match this message. Please check the message body.',
                 message=message
             )
             DLQ_COUNT.inc()
