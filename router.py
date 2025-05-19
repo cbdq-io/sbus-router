@@ -55,7 +55,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '0.5.2'
+__version__ = '0.5.3'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -177,6 +177,12 @@ class RouterRule:
 
         self.is_session_required = parsed_definition.get('is_session_required', False)
         self.jmespath = parsed_definition.get('jmespath', None)
+
+        if self.jmespath:
+            self.jmespath_expr = jmespath.compile(self.jmespath)
+        else:
+            self.jmespath_expr = None
+
         self.regexp = parsed_definition.get('regexp', None)
 
         if self.regexp:
@@ -234,7 +240,7 @@ class RouterRule:
         except json.decoder.JSONDecodeError:
             return []
 
-        result = jmespath.search(self.jmespath, message_json)
+        result = self.jmespath_expr.search(message_json)
 
         if isinstance(result, list):
             return self.flatten_list(result)
@@ -414,6 +420,18 @@ class EnvironmentConfigParser:
     def __init__(self, environ: dict = dict(os.environ)) -> None:
         self._environ = environ
 
+    def get_prefetch_count(self) -> int:
+        """
+        Get the number of messages to be prefetch by the client.
+
+        Returns
+        -------
+        int
+            The number of messages to be prefetched.  If not provided, then
+            the default is 100.
+        """
+        return int(self._environ.get('ROUTER_PREFETCH_COUNT', '100'))
+
     def get_prefixed_values(self, prefix: str) -> list:
         """
         Get values from the environment that match a prefix.
@@ -543,6 +561,7 @@ class ServiceBusHandler:
 
     def __init__(self, config: EnvironmentConfigParser):
         self.source_connection_string = config.get_source_connection_string()
+        self.config = config
         self.namespaces = config.service_bus_namespaces().get_all_namespaces()  # Used for sending, not receiving
         self.input_topics = config.topics_and_subscriptions()
         self.rules = config.get_rules()
@@ -581,7 +600,7 @@ class ServiceBusHandler:
                 auto_lock_renewer=self.lock_renewer,
                 max_auto_renew_duration=300,
                 max_wait_time=5,
-                prefetch_count=20
+                prefetch_count=self.config.get_prefetch_count()
             )
             logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
         else:

@@ -5,6 +5,15 @@
 
 ### Fix
 
+* Bump the prefetch count from 20 to 100 and allow it to be configured. [Ben Dalling]
+
+* Pre-compile JMESPath expressions. [Ben Dalling]
+
+
+## 0.5.2 (2025-05-16)
+
+### Fix
+
 * If a message is sent do the DLQ, do not include the message body in the custom properties. [Ben Dalling]
 
 
