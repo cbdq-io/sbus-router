@@ -177,6 +177,12 @@ class RouterRule:
 
         self.is_session_required = parsed_definition.get('is_session_required', False)
         self.jmespath = parsed_definition.get('jmespath', None)
+
+        if self.jmespath:
+            self.jmespath_expr = jmespath.compile(self.jmespath)
+        else:
+            self.jmespath_expr = None
+
         self.regexp = parsed_definition.get('regexp', None)
 
         if self.regexp:
@@ -234,7 +240,7 @@ class RouterRule:
         except json.decoder.JSONDecodeError:
             return []
 
-        result = jmespath.search(self.jmespath, message_json)
+        result = self.jmespath_expr.search(message_json)
 
         if isinstance(result, list):
             return self.flatten_list(result)
