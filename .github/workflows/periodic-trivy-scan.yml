@@ -48,7 +48,7 @@ jobs:
           image-ref: ghcr.io/${{ github.repository }}:${{ steps.get-tag.outputs.tag }}
           format: sarif
           output: trivy-results.sarif
-          trivy-config: trivy.yaml
+          severity: MEDIUM,HIGH,CRITICAL
 
       - name: Upload SARIF file to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3
