@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Other
+
+* Ci: update the periodic Trivy scan. [Ben Dalling]
+
+
 ## 0.5.3 (2025-05-19)
 
 ### Fix
