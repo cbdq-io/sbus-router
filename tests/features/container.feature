@@ -9,6 +9,7 @@ Feature: Test the Container
 
         Examples:
             | path                           |
+            | /home/appuser/nukedlq.py       |
             | /home/appuser/rule-schema.json |
             | /home/appuser/router.py        |
 

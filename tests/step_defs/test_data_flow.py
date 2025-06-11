@@ -74,6 +74,19 @@ def _():
     assert 'dlq_message_count_total 1.0' in cmd.stdout
 
 
+@then('the deleted DLQ messages is 1')
+def _(connection_string: str):
+    from nukedlq import nuke_dead_letter_messages
+
+    deleted_messages = nuke_dead_letter_messages(
+        connection_str=connection_string,
+        topic_name='topic.2',
+        subscription_name='test',
+        period='PT1S'
+    )
+    assert deleted_messages == 1
+
+
 def is_message_valid(message: ServiceBusMessage, expected_body: str, topic_name: str) -> bool:
     """
     Check the validity of the received message.
