@@ -1,11 +1,15 @@
 # Changelog
 
 
-## Unreleased
+## 0.6.0 (2025-06-11)
 
 ### Features
 
 * Add a nukedlq.py script to the image. [Ben Dalling]
+
+### Build
+
+* Release/0.6.0. [Ben Dalling]
 
 ### Continuous Integration
 
