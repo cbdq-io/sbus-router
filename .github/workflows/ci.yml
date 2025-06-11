@@ -48,3 +48,10 @@ jobs:
 
       - name: Test
         run: make test
+
+      - name: Trivy Scan
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          image-ref: router:latest
+          scanners: vuln
+          trivy-config: trivy.yaml

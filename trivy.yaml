@@ -1,0 +1,26 @@
+---
+# Config file for Trivy.
+exit-code: 1
+
+format: table
+
+ignore-unfixed: true
+
+pkg:
+  type:
+    - os
+    - library
+
+scan:
+  skip-files: []
+
+severity:
+  - MEDIUM
+  - CRITICAL
+  - HIGH
+
+scanners:
+  - vuln
+
+vulnerability:
+  ignore-unfixed: true
