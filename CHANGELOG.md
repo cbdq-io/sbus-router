@@ -1,7 +1,7 @@
 # Changelog
 
 
-## Unreleased
+## 0.6.1 (2025-06-11)
 
 ### Fix
 
