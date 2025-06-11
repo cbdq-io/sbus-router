@@ -7,6 +7,10 @@
 
 * Add a nukedlq.py script to the image. [Ben Dalling]
 
+### Build
+
+* Release/0.6.0. [Ben Dalling]
+
 ### Continuous Integration
 
 * Add a Trivy scan to the CI pipeline. [Ben Dalling]
