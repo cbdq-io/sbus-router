@@ -2,9 +2,7 @@ bandit
 flake8
 flake8-docstrings
 flake8-quotes
-gitchangelog
 isort
-pystache
 pytest-cov
 pytest-timeout
 radon
