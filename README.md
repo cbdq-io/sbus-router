@@ -68,6 +68,7 @@ as an async function and MUST use `await` on any calls that will incure
 I/O.  The function MUST be defined to accept the following arguments:
 
 | Name                   | Type                                  | Description                                         |
+| ---------------------- | ------------------------------------- | --------------------------------------------------- |
 | sender                 | azure.servicebus.aio.ServiceBusSender | The sender for the destination topic.               |
 | message_body           | str or Bytes                          | The body of the message to be sent.                 |
 | application_properties | dict or None                          | Any properties that were set on the source message. |

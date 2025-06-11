@@ -8,7 +8,7 @@ build:
 	docker compose -f tests/resources/docker-compose.yaml build
 
 changelog:
-	gitchangelog > CHANGELOG.md
+	docker run --quiet --rm --volume "${PWD}:/mnt/source" --workdir /mnt/source ghcr.io/cbdq-io/gitchangelog > CHANGELOG.md
 
 clean:
 	docker compose -f tests/resources/docker-compose.yaml down -t 0 --remove-orphans

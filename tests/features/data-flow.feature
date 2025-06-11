@@ -24,3 +24,4 @@ Scenario Outline: Inject a Message and Confirm the Destination
 Scenario: Replay DLQ Message
     Given the landing Service Bus Emulator
     Then the DLQ count is 1
+    Then the deleted DLQ messages is 1

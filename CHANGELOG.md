@@ -3,9 +3,19 @@
 
 ## Unreleased
 
-### Other
+### Features
 
-* Ci: update the periodic Trivy scan. [Ben Dalling]
+* Add a nukedlq.py script to the image. [Ben Dalling]
+
+### Continuous Integration
+
+* Add a Trivy scan to the CI pipeline. [Ben Dalling]
+
+* Update the periodic Trivy scan. [Ben Dalling]
+
+### Documentation
+
+* Fix formatting errors in README.md and containerise change log. [Ben Dalling]
 
 
 ## 0.5.3 (2025-05-19)
@@ -34,11 +44,11 @@
 
 * Remove python-qpid-proton from the artefact. [Ben Dalling]
 
-### Other
+### Continuous Integration
 
-* Ci: On push to develop, publish a "latest" artefact. [Ben Dalling]
+* On push to develop, publish a "latest" artefact. [Ben Dalling]
 
-* Ci: Periodically run Trivy against the latest released container image. [Ben Dalling]
+* Periodically run Trivy against the latest released container image. [Ben Dalling]
 
 
 ## 0.5.0 (2025-03-17)
@@ -52,15 +62,15 @@
 
 ## 0.4.0 (2025-03-16)
 
+### Features
+
+* Add the ability to set a hook for a custom sender. [Ben Dalling]
+
 ### Fix
 
 * Ensure message properties are preserved during routing. [Ben Dalling]
 
 * Ensure receivers are created for unique topic/subscription combinations. [Ben Dalling]
-
-### Features
-
-* Add the ability to set a hook for a custom sender. [Ben Dalling]
 
 
 ## 0.3.1 (2025-03-07)
@@ -83,6 +93,8 @@
   BREAKING CHANGE: Removed the separate DLQ topic in favour of the
   native DLQ process.
 
+* Docker Compose environment variable. [Ben Dalling]
+
 
 ## 0.2.5 (2025-02-05)
 
@@ -96,6 +108,20 @@
 ### Features
 
 * Add the "ROUTER_ALLOWED_SASL_MECHS" environment variable. [Ben Dalling]
+
+### Fix
+
+* Bump release number. [Ben Dalling]
+
+* Migrate Git Change Log to the Conventianal Commit standard (II). [Ben Dalling]
+
+* Ensure full pipeline skips on push of tag. [Ben Dalling]
+
+* Migrate Git Change Log to the Conventianal Commit standard. [Ben Dalling]
+
+* Better readiness tests that remove the need for random sleeps. [Ben Dalling]
+
+* Add a healthcheck to the sqledge container. [Ben Dalling]
 
 
 ## 0.2.3 (2025-01-27)
