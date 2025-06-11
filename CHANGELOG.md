@@ -4,6 +4,7 @@
 ## Unreleased
 
 ### Features
+<<<<<<< HEAD
 
 * Add a nukedlq.py script to the image. [Ben Dalling]
 
@@ -12,6 +13,16 @@
 * Add a Trivy scan to the CI pipeline. [Ben Dalling]
 
 * Update the periodic Trivy scan. [Ben Dalling]
+=======
+
+* Add a nukedlq.py script to the image. [Ben Dalling]
+
+### Other
+
+* Ci: add a Trivy scan to the CI pipeline. [Ben Dalling]
+
+* Ci: update the periodic Trivy scan. [Ben Dalling]
+>>>>>>> 86c0d52 (chg: dev: Update change log.)
 
 
 ## 0.5.3 (2025-05-19)
