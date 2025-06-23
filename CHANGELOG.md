@@ -1,6 +1,24 @@
 # Changelog
 
 
+## Unreleased
+
+### Features
+
+* Updated periodic-trivy-scan.yml with github.repository variable. [James Loughlin]
+
+
+## 0.6.1 (2025-06-11)
+
+### Fix
+
+* Ensure more than 100 messages can be removed from dead letter messages. [Ben Dalling]
+
+### Build
+
+* Hotfix/0.6.1. [Ben Dalling]
+
+
 ## 0.6.0 (2025-06-11)
 
 ### Features
