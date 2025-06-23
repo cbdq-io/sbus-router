@@ -26,7 +26,7 @@ jobs:
       - name: Get latest SemVer tag from GitHub repo
         id: get-tag
         run: |
-          tags=$(curl -s https://api.github.com/repos/cbdq-io/sbus-router/tags | jq -r '.[].name')
+          tags=$(curl -s https://api.github.com/repos/${{ github.repository }}/tags | jq -r '.[].name')
 
           echo "Tags from GitHub:"
           echo "$tags"
