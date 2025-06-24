@@ -64,6 +64,52 @@ parser.add_argument(
 )
 
 
+def _parse_cutoff_time(period: str) -> datetime:
+    try:
+        cutoff_period = isodate.parse_duration(period)
+    except Exception as e:
+        logger.error(f'Invalid ISO 8601 duration: {period}. Error: {e}')
+        sys.exit(2)
+    return datetime.now(timezone.utc) - cutoff_period
+
+
+def _should_delete(peeked_msg, cutoff_time: datetime) -> bool:
+    return peeked_msg.enqueued_time_utc < cutoff_time
+
+
+def _delete_matching_message(receiver, target_time: datetime) -> bool:
+    for msg in receiver.receive_messages(max_message_count=1):
+        if msg.enqueued_time_utc == target_time:
+            return True
+    return False
+
+
+def _handle_peeked_message(receiver, peeked_msg, cutoff_time: datetime) -> bool:
+    if not _should_delete(peeked_msg, cutoff_time):
+        return False
+    return _delete_matching_message(receiver, peeked_msg.enqueued_time_utc)
+
+
+def _process_peeked_messages(receiver, cutoff_time: datetime, max_peek: int) -> int:
+    messages_deleted = 0
+    last_sequence_number = None
+
+    while True:
+        peeked = receiver.peek_messages(
+            max_message_count=max_peek,
+            sequence_number=last_sequence_number + 1 if last_sequence_number else None
+        )
+        if not peeked:
+            break
+
+        for peeked_msg in peeked:
+            last_sequence_number = peeked_msg.sequence_number
+            if _handle_peeked_message(receiver, peeked_msg, cutoff_time):
+                messages_deleted += 1
+
+    return messages_deleted
+
+
 def nuke_dead_letter_messages(connection_str: str, topic_name: str, subscription_name: str, period: str) -> int:
     """
     Nuke DLQ messages on a subscription.
@@ -88,37 +134,21 @@ def nuke_dead_letter_messages(connection_str: str, topic_name: str, subscription
     int
         The number of dead letter messages that we removed.
     """
-    try:
-        cutoff_period = isodate.parse_duration(period)
-    except Exception as e:
-        logger.error(f'Invalid ISO 8601 duration: {period}. Error: {e}')
-        sys.exit(2)
+    cutoff_time = _parse_cutoff_time(period)
     max_peek = 100
+    client = ServiceBusClient.from_connection_string(connection_str)
 
-    # Calculate cutoff time
-    cutoff_time = datetime.now(timezone.utc) - cutoff_period
-    messages_deleted = 0
+    receiver = client.get_subscription_receiver(
+        topic_name=topic_name,
+        subscription_name=subscription_name,
+        sub_queue='deadletter',
+        receive_mode=ServiceBusReceiveMode.RECEIVE_AND_DELETE
+    )
 
-    # Initialize client
-    with ServiceBusClient.from_connection_string(connection_str) as client:
-        receiver = client.get_subscription_receiver(
-            topic_name=topic_name,
-            subscription_name=subscription_name,
-            sub_queue='deadletter',  # Targeting DLQ of the subscription
-            receive_mode=ServiceBusReceiveMode.RECEIVE_AND_DELETE
-        )
+    messages_deleted = _process_peeked_messages(receiver, cutoff_time, max_peek)
 
-        with receiver:
-            peeked = receiver.peek_messages(max_message_count=max_peek)
-
-            for peeked_msg in peeked:
-                if peeked_msg.enqueued_time_utc < cutoff_time:
-                    # Receive (and auto-delete) the message matching this enqueued time
-                    for msg in receiver.receive_messages(max_message_count=1):
-                        if msg.enqueued_time_utc == peeked_msg.enqueued_time_utc:
-                            messages_deleted += 1
-                            break
-
+    receiver.close()
+    client.close()
     return messages_deleted
 
 
