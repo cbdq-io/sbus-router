@@ -7,6 +7,10 @@
 
 * Add a Prometheus Counter for each rule as it is matched. [Ben Dalling]
 
+### Build
+
+* Release/0.7.0. [Ben Dalling]
+
 ### Continuous Integration
 
 * Updated periodic-trivy-scan.yml with github.repository variable. [James Loughlin]
