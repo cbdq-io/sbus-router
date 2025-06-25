@@ -492,6 +492,28 @@ class EnvironmentConfigParser:
         """Get the connection string of the source namespace."""
         return self._environ['ROUTER_SOURCE_CONNECTION_STRING']
 
+    def init_rules_usage(self) -> dict[str, Counter]:
+        """
+        Initialise a dictionary representing the usage of all defined rules.
+
+        All values are set to zero.
+
+        Returns
+        -------
+        dict[str, Counter]
+            Each rule name will be a key to a value that is a Prometheus
+            Counter.
+        """
+        response = {}
+
+        for rule in self.get_rules():
+            response[rule.name()] = Counter(
+                f'{rule.name()}_usage_count',
+                f'How often the {rule.name()} rule has been matched.'
+            )
+
+        return response
+
     def max_tasks(self) -> int:
         """Get the max number of tasks per source subscription."""
         return int(self._environ.get('ROUTER_MAX_TASKS', '1'))
@@ -578,6 +600,7 @@ class ServiceBusHandler:
         self.sender_locks = defaultdict(asyncio.Lock)
         self.sender_send_locks = defaultdict(asyncio.Lock)
         self.rules_by_topic = defaultdict(list)
+        self.rules_usage = config.init_rules_usage()
 
         for rule in self.rules:
             self.rules_by_topic[rule.source_topic].append(rule)
@@ -683,6 +706,7 @@ class ServiceBusHandler:
             if is_match:
                 try:
                     logger.debug(f'Successfully matched message to {rule.name()}.')
+                    self.rules_usage[rule.name()].inc()
                     await self.send_message(destination_namespaces, destination_topics, message_body,
                                             message.application_properties)
                     await receiver.complete_message(message)
