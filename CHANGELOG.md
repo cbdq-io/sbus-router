@@ -3,6 +3,21 @@
 
 ## Unreleased
 
+### Features
+
+* Add a Prometheus Counter for each rule as it is matched. [Ben Dalling]
+
+### Build
+
+* Release/0.7.0. [Ben Dalling]
+
+### Continuous Integration
+
+* Updated periodic-trivy-scan.yml with github.repository variable. [James Loughlin]
+
+
+## 0.6.1 (2025-06-11)
+
 ### Fix
 
 * Ensure more than 100 messages can be removed from dead letter messages. [Ben Dalling]
