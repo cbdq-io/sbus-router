@@ -1,11 +1,15 @@
 # Changelog
 
 
-## Unreleased
+## 0.7.0 (2025-06-25)
 
 ### Features
 
 * Add a Prometheus Counter for each rule as it is matched. [Ben Dalling]
+
+### Build
+
+* Release/0.7.0. [Ben Dalling]
 
 ### Continuous Integration
 
