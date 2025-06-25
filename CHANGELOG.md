@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+### Features
+
+* Add a Prometheus Counter for each rule as it is matched. [Ben Dalling]
+
 ### Continuous Integration
 
 * Updated periodic-trivy-scan.yml with github.repository variable. [James Loughlin]
