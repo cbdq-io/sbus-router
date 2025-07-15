@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+### Features
+
+* Add checks for DLQ on source topics. [Ben Dalling]
+
+* Allow the user to configure the log format via an environment variable. [Ben Dalling]
+
 ### Build
 
 * Upgrade libdjvulibre to fix CVE-2025-53367. [Ben Dalling]
