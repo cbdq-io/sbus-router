@@ -41,6 +41,7 @@ import os
 import re
 import signal
 import sys
+import time
 from collections import defaultdict
 from string import Template
 
@@ -606,6 +607,9 @@ class ServiceBusHandler:
         self.sender_send_locks = defaultdict(asyncio.Lock)
         self.rules_by_topic = defaultdict(list)
         self.rules_usage = config.init_rules_usage()
+        self.keep_alive_tasks = []
+        self.shutdown_event = asyncio.Event()
+        self.dlq_last_warned = defaultdict(lambda: 0)
 
         for rule in self.rules:
             self.rules_by_topic[rule.source_topic].append(rule)
@@ -613,8 +617,18 @@ class ServiceBusHandler:
     async def close(self):
         """Gracefully close all clients and senders."""
         logger.warning('Closing all connections on shutdown.')
+
         await asyncio.gather(*(sender.close() for sender in self.senders.values()))
         await asyncio.gather(*(client.close() for client in self.clients.values()))
+        self.shutdown_event.set()
+
+        for task in self.keep_alive_tasks:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
         if self.source_client:
             await self.source_client.close()
 
@@ -684,6 +698,34 @@ class ServiceBusHandler:
                 return rule.is_session_required
 
         return False
+
+    async def keep_source_connection_alive(self, interval=240):
+        """Ping DLQ via peek to check for presence of dead-letter messages."""
+        while not self.shutdown_event.is_set():
+            for topic_name, subscription_name in self.input_topics:
+                logger.debug(f'Checking DLQ for {topic_name}/{subscription_name}')
+
+                try:
+                    async with self.source_client.get_subscription_receiver(
+                        topic_name=topic_name,
+                        subscription_name=subscription_name,
+                        sub_queue='deadletter',
+                        prefetch_count=1
+                    ) as receiver:
+                        msgs = await receiver.peek_messages(max_message_count=1)
+                        current_time = time.time()
+                        key = (topic_name, subscription_name)
+
+                        if msgs:
+                            last_warned = self.dlq_last_warned[key]
+
+                            if current_time - last_warned >= 3600:
+                                logger.warning(f'DLQ has messages for {topic_name}/{subscription_name}')
+                                self.dlq_last_warned[key] = current_time
+                except Exception as e:
+                    logger.error(f'Error checking DLQ for {topic_name}/{subscription_name}: {e}')
+
+            await asyncio.sleep(interval)
 
     @PROCESSING_TIME.time()
     async def process_message(self, source_topic: str, message: ServiceBusReceivedMessage,
@@ -804,6 +846,10 @@ class ServiceBusHandler:
         for namespace, conn_str in self.namespaces.items():
             logger.debug(f'Creating connection for destination namespace: {namespace}.')
             self.clients[namespace] = ServiceBusClient.from_connection_string(conn_str)
+
+        self.keep_alive_tasks.append(asyncio.create_task(
+            self.keep_source_connection_alive()
+        ))
 
 
 async def main():
