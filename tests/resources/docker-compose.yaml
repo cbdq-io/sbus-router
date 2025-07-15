@@ -24,6 +24,7 @@ services:
         condition: service_completed_successfully
     environment:
       ISO_3166_1_ALPHA_2: FR
+      LOG_FORMAT: "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
       LOG_LEVEL: DEBUG
       ROUTER_CUSTOM_SENDER: "custom:custom_sender"
       ROUTER_MAX_TASKS: 2
