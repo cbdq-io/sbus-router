@@ -7,6 +7,7 @@ LABEL org.opencontainers.image.description "A configurable router for Azure Serv
 # hadolint ignore=DL3008
 RUN apt-get update \
   && apt-get install --no-install-recommends --yes bind9-dnsutils ncat \
+  && apt-get upgrade --yes libdjvulibre-dev libdjvulibre-text libdjvulibre21 \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/* \
   && addgroup --gid 1000 appuser \
