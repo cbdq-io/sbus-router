@@ -82,7 +82,12 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
     return logger
 
 
-logging.basicConfig(format='%(levelname)s [%(filename)s:%(lineno)d] %(message)s')
+logging.basicConfig(
+    format=os.environ.get(
+        'LOG_FORMAT',
+        '%(levelname)s [%(filename)s:%(lineno)d] %(message)s'
+    )
+)
 logger = get_logger(__file__)
 custom_sender_string = os.getenv('ROUTER_CUSTOM_SENDER')
 
