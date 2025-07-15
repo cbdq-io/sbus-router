@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Build
+
+* Upgrade libdjvulibre to fix CVE-2025-53367. [Ben Dalling]
+
+
 ## 0.7.0 (2025-06-25)
 
 ### Features

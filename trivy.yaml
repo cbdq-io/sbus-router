@@ -4,8 +4,6 @@ exit-code: 1
 
 format: table
 
-ignore-unfixed: true
-
 pkg:
   type:
     - os
