@@ -1,7 +1,7 @@
 # Changelog
 
 
-## Unreleased
+## 0.8.0 (2025-07-17)
 
 ### Features
 
