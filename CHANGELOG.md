@@ -11,6 +11,8 @@
 
 ### Build
 
+* Release/0.8.0. [Ben Dalling]
+
 * Upgrade libdjvulibre to fix CVE-2025-53367. [Ben Dalling]
 
 
