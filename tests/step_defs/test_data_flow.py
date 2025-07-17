@@ -66,12 +66,12 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
         pytest.skip(f'Output topic is "{output_topic}".')
 
 
-@then('the DLQ count is 1')
+@then('the DLQ count is 2')
 def _():
     """the DLQ count is 1."""
     host = testinfra.get_host('docker://router')
     cmd = host.run('curl localhost:8000')
-    assert 'dlq_message_count_total 1.0' in cmd.stdout
+    assert 'dlq_message_count_total 2.0' in cmd.stdout
 
 
 @then('the deleted DLQ messages is 1')

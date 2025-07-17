@@ -9,6 +9,7 @@ least one rule configured  (see below).
 
 | Environment Variable | Required | Default | Description |
 | -------------------- | -------- | ------- | ----------- |
+| LOG_FORMAT | No | "%(levelname)s [%(filename)s:%(lineno)d] %(message)s" | The log format (passed to `logging.basicConfig) |
 | LOG_LEVEL | | WARN | The log level for the router.|
 | ROUTER_CUSTOM_SENDER | No | N/A | See below. |
 | ROUTER_MAX_TASKS | No | 1 | The number of tasks to allocate to each topic/subscription. |
@@ -75,3 +76,11 @@ I/O.  The function MUST be defined to accept the following arguments:
 
 An example custom sender is implemented in the file
 `tests/resources/custom.py`.
+
+## Useful External Links
+
+The followng links can assist in crafting rules and regular expressions:
+
+- https://gchq.github.io/CyberChef
+- https://pythex.org
+- https://play.jmespath.org

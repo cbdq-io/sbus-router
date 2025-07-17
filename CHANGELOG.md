@@ -5,6 +5,21 @@
 
 ### Features
 
+* Add checks for DLQ on source topics. [Ben Dalling]
+
+* Allow the user to configure the log format via an environment variable. [Ben Dalling]
+
+### Build
+
+* Release/0.8.0. [Ben Dalling]
+
+* Upgrade libdjvulibre to fix CVE-2025-53367. [Ben Dalling]
+
+
+## 0.7.0 (2025-06-25)
+
+### Features
+
 * Add a Prometheus Counter for each rule as it is matched. [Ben Dalling]
 
 ### Build
