@@ -656,7 +656,10 @@ class ServiceBusHandler:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
                 topic_name=topic_name,
-                subscription_name=subscription_name
+                subscription_name=subscription_name,
+                auto_lock_renewer=self.lock_renewer,
+                max_auto_renew_duration=max_renew,
+                prefetch_count=self.config.get_prefetch_count()
             )
 
         return receiver
