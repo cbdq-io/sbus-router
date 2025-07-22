@@ -2,7 +2,7 @@
 
 from pytest_bdd import given, parsers, scenario, then, when
 
-from router import EnvironmentConfigParser
+from router import EnvironmentConfigParser, ServiceBusHandler
 
 
 @scenario('environment-config-parser.feature', 'EnvironmentConfigParser Methods')
@@ -56,7 +56,6 @@ def _(method_name: str, expected_value: str, environ: dict):
         expected_value = int(expected_value)
         actual_value = widget.get_prometheus_port()
     elif method_name == 'get_rules':
-        from router import ServiceBusHandler
         ServiceBusHandler(widget)
         widget.topics_and_subscriptions()
         actual_value = widget.get_rules()[0].name()
