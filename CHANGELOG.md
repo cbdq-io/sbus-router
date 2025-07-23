@@ -1,6 +1,19 @@
 # Changelog
 
 
+## Unreleased
+
+### Features
+
+* Allow specification of max_auto_renew_duration in rules. [Ben Dalling]
+
+### Fix
+
+* Send fan out messages concurrently. [Ben Dalling]
+
+* Enable auto_locl_renewer for non-sessioned receivers. [Ben Dalling]
+
+
 ## 0.8.0 (2025-07-17)
 
 ### Features
