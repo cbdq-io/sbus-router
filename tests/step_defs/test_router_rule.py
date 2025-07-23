@@ -64,6 +64,12 @@ def _():
     pass
 
 
+@then(parsers.parse('max_auto_renew_duration is {max_auto_renew_duration:d}'))
+def _(max_auto_renew_duration: int, router_rule: RouterRule):
+    """max_auto_renew_duration is <max_auto_renew_duration>."""
+    assert max_auto_renew_duration == router_rule.max_auto_renew_duration
+
+
 @then(parsers.parse('the RouterRule match is {is_match}'))
 def _(is_match: str, router_rule: RouterRule, message_contents: str, source_topic: str):
     """the RouterRule match is <is_match>."""
