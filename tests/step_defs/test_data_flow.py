@@ -123,6 +123,7 @@ def is_message_valid(message: ServiceBusMessage, expected_body: str, topic_name:
 @then('the expected output message is received')
 def _(connection_string: str, input_topic: str, output_topic: str, message_body: str):
     """The expected output message is received."""
+    output_topics = output_topic.split(',')
     client = ServiceBusClient.from_connection_string(connection_string)
     sender = client.get_topic_sender(input_topic)
     logger.debug(f'Sending message "{message_body}" to "{input_topic}" at {time.time()}.')
@@ -130,22 +131,23 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
     sender.close()
     message_received = False
 
-    if output_topic == 'ie.topic':
-        receiver = client.get_subscription_receiver(
-            output_topic,
-            'test',
-            max_wait_time=5,
-            session_id='0'
-        )
-    else:
-        receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=5)
+    for output_topic in output_topics:
+        if output_topic == 'ie.topic':
+            receiver = client.get_subscription_receiver(
+                output_topic,
+                'test',
+                max_wait_time=5,
+                session_id='0'
+            )
+        else:
+            receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=5)
 
-    for message in receiver:
-        logger.debug(f'Message received: "{str(message.body)}" of type "{message.body_type}".')
-        receiver.complete_message(message)
-        message_received = True
+        for message in receiver:
+            logger.debug(f'Message received: "{str(message.body)}" of type "{message.body_type}".')
+            receiver.complete_message(message)
+            message_received = True
 
-    receiver.close()
-    client.close()
-    assert message_received, f'Message not received within the retry limit from "{output_topic}".'
-    assert is_message_valid(message, message_body, output_topic)
+        receiver.close()
+        client.close()
+        assert message_received, f'Message not received within the retry limit from "{output_topic}".'
+        assert is_message_valid(message, message_body, output_topic)

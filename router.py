@@ -833,20 +833,31 @@ class ServiceBusHandler:
         application_properties : dict
             The application properties of the original message.
         """
+        tasks = []
+        failures = []
+
         for idx, namespace_name in enumerate(namespaces):
             topic_name = topics[idx]
             key = (namespace_name, topic_name)
-            sender = await self.get_sender(namespace_name, topic_name)
 
-            async with self.sender_send_locks[key]:
-                try:
-                    if custom_sender:
-                        await custom_sender(sender, topic_name, message_body, application_properties)
-                    else:
-                        await sender.send_messages(message_body, application_properties=application_properties)
-                except Exception as e:
-                    logger.error(f'Failed to send message with sender {key}: {e}')
-                    raise
+            async def send_to_destination(ns=namespace_name, tp=topic_name, k=key):
+                sender = await self.get_sender(ns, tp)
+                async with self.sender_send_locks[k]:
+                    try:
+                        if custom_sender:
+                            await custom_sender(sender, tp, message_body, application_properties)
+                        else:
+                            await sender.send_messages(message_body, application_properties=application_properties)
+                    except Exception as e:
+                        logger.error(f'Failed to send message with sender {k}: {e}')
+                        failures.append((k, e))
+
+            tasks.append(asyncio.create_task(send_to_destination()))
+
+        await asyncio.gather(*tasks)
+
+        if failures:
+            raise RuntimeError(f'{len(failures)} destination(s) failed: {failures}')
 
     async def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""
