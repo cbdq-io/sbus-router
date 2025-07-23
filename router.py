@@ -160,6 +160,8 @@ class RouterRule:
         The destination topics for the messages matching this rule.
     jmespath : str
         A JMESPath string for checking against a JSON payload.
+    max_auto_renew_duration : int
+        The time in seconds to allow messags for this topic to be locked for (default: 300).
     regexp : str
         A regular expression for comparing against the message.
     source_topic : str
@@ -188,6 +190,11 @@ class RouterRule:
             self.jmespath_expr = jmespath.compile(self.jmespath)
         else:
             self.jmespath_expr = None
+
+        self.max_auto_renew_duration = parsed_definition.get(
+            'max_auto_renew_duration',
+            300
+        )
 
         self.regexp = parsed_definition.get('regexp', None)
 
@@ -569,7 +576,7 @@ class EnvironmentConfigParser:
         rules = self.get_rules()
 
         for rule in rules:
-            instance = (rule.source_topic, rule.source_subscription)
+            instance = (rule.source_topic, rule.source_subscription, rule.max_auto_renew_duration)
 
             if instance not in response:
                 response.append(instance)
@@ -632,7 +639,7 @@ class ServiceBusHandler:
         if self.source_client:
             await self.source_client.close()
 
-    async def get_receiver(self, topic_name: str, subscription_name: str) -> ServiceBusReceiver:
+    async def get_receiver(self, topic_name: str, subscription_name: str, max_renew: int) -> ServiceBusReceiver:
         """Get a receiver for a topic/subscription."""
         if self.is_session_required(topic_name, subscription_name):
             receiver = self.source_client.get_subscription_receiver(
@@ -640,7 +647,7 @@ class ServiceBusHandler:
                 subscription_name=subscription_name,
                 session_id=NEXT_AVAILABLE_SESSION,
                 auto_lock_renewer=self.lock_renewer,
-                max_auto_renew_duration=300,
+                max_auto_renew_duration=max_renew,
                 max_wait_time=5,
                 prefetch_count=self.config.get_prefetch_count()
             )
@@ -649,7 +656,10 @@ class ServiceBusHandler:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
                 topic_name=topic_name,
-                subscription_name=subscription_name
+                subscription_name=subscription_name,
+                auto_lock_renewer=self.lock_renewer,
+                max_auto_renew_duration=max_renew,
+                prefetch_count=self.config.get_prefetch_count()
             )
 
         return receiver
@@ -702,7 +712,7 @@ class ServiceBusHandler:
     async def keep_source_connection_alive(self, interval=240):
         """Ping DLQ via peek to check for presence of dead-letter messages."""
         while not self.shutdown_event.is_set():
-            for topic_name, subscription_name in self.input_topics:
+            for topic_name, subscription_name, _ in self.input_topics:
                 logger.debug(f'Checking DLQ for {topic_name}/{subscription_name}')
 
                 try:
@@ -777,7 +787,7 @@ class ServiceBusHandler:
             logger.error(f'Failed to send message to DLQ: {e}')
             await receiver.abandon_message(message)
 
-    async def receive_and_process(self, topic_name, subscription_name):
+    async def receive_and_process(self, topic_name, subscription_name, max_renew):
         """Receive messages, process them, and forward."""
         if not self.source_client:
             logger.error('Source client is not initialized, cannot receive messages.')
@@ -785,7 +795,7 @@ class ServiceBusHandler:
 
         while True:
             try:
-                async with await self.get_receiver(topic_name, subscription_name) as receiver:
+                async with await self.get_receiver(topic_name, subscription_name, max_renew) as receiver:
                     async for message in receiver:
                         await self.process_message(
                             topic_name,
@@ -801,9 +811,9 @@ class ServiceBusHandler:
         """Start all receivers."""
         receive_tasks = []
 
-        for topic, subscription in self.input_topics:
+        for topic, subscription, max_renew in self.input_topics:
             for i in range(0, self.max_tasks):
-                task = asyncio.create_task(self.receive_and_process(topic, subscription))
+                task = asyncio.create_task(self.receive_and_process(topic, subscription, max_renew))
                 receive_tasks.append(task)
 
         await asyncio.gather(*receive_tasks)
@@ -823,20 +833,31 @@ class ServiceBusHandler:
         application_properties : dict
             The application properties of the original message.
         """
+        tasks = []
+        failures = []
+
         for idx, namespace_name in enumerate(namespaces):
             topic_name = topics[idx]
             key = (namespace_name, topic_name)
-            sender = await self.get_sender(namespace_name, topic_name)
 
-            async with self.sender_send_locks[key]:
-                try:
-                    if custom_sender:
-                        await custom_sender(sender, topic_name, message_body, application_properties)
-                    else:
-                        await sender.send_messages(message_body, application_properties=application_properties)
-                except Exception as e:
-                    logger.error(f'Failed to send message with sender {key}: {e}')
-                    raise
+            async def send_to_destination(ns=namespace_name, tp=topic_name, k=key):
+                sender = await self.get_sender(ns, tp)
+                async with self.sender_send_locks[k]:
+                    try:
+                        if custom_sender:
+                            await custom_sender(sender, tp, message_body, application_properties)
+                        else:
+                            await sender.send_messages(message_body, application_properties=application_properties)
+                    except Exception as e:
+                        logger.error(f'Failed to send message with sender {k}: {e}')
+                        failures.append((k, e))
+
+            tasks.append(asyncio.create_task(send_to_destination()))
+
+        await asyncio.gather(*tasks)
+
+        if failures:
+            raise RuntimeError(f'{len(failures)} destination(s) failed: {failures}')
 
     async def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""

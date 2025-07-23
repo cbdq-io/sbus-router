@@ -35,6 +35,10 @@
       "description": "A JMESPath expression used for querying data.",
       "type": "string"
     },
+    "max_auto_renew_duration": {
+      "description": "The time in seconds to allow messags for this topic to be locked for (default: 300).",
+      "type": "integer"
+    },
     "regexp": {
       "description": "A regular expression pattern for matching data.",
       "type": "string"
