@@ -13,6 +13,10 @@
 
 * Enable auto_locl_renewer for non-sessioned receivers. [Ben Dalling]
 
+### Build
+
+* Release/0.9.0. [Ben Dalling]
+
 
 ## 0.8.0 (2025-07-17)
 
