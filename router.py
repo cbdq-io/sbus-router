@@ -34,6 +34,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 import asyncio
+import contextlib
 import importlib
 import json
 import logging
@@ -655,7 +656,7 @@ class ServiceBusHandler:
                 max_wait_time=5,
                 prefetch_count=self.config.get_prefetch_count()
             )
-            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
+            logger.debug(f'Created a session receiver for {topic_name}/{subscription_name}')
         else:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
@@ -820,6 +821,8 @@ class ServiceBusHandler:
                             message,
                             receiver,
                         )
+            except asyncio.CancelledError:
+                break
             except OperationTimeoutError:
                 logger.debug(f'Timed out on {topic_name}/{subscription_name}.')
             except Exception as e:
@@ -904,12 +907,15 @@ async def main():
             logger.warning('Shutdown signal received. Cleaning up...')
             stop_event.set()
 
-        loop.add_signal_handler(signal.SIGTERM, shutdown)
-        loop.add_signal_handler(signal.SIGINT, shutdown)  # Handle CTRL+C
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(signal.SIGTERM, shutdown)
 
-        await handler.run()  # Start processing messages
+        run_task = asyncio.create_task(handler.run())
         await stop_event.wait()  # Wait for shutdown signal
+        run_task.cancel()
 
+        with contextlib.suppress(asyncio.CancelledError):
+            await run_task
     finally:
         await handler.close()  # Ensure all connections are properly closed
 
