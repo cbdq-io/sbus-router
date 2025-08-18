@@ -34,6 +34,7 @@ OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 import asyncio
+import contextlib
 import importlib
 import json
 import logging
@@ -229,7 +230,7 @@ class RouterRule:
                 flat_list.append(item)
         return flat_list
 
-    def get_data(self, message_body: str) -> list:
+    def get_data(self, message_body: str, message_data: dict) -> list:
         """
         Extract the relevant data from the message body for rule evaluation.
 
@@ -239,6 +240,9 @@ class RouterRule:
         ----------
         message_body : str
             The message body as a string.
+        message_data : dict
+            If the message was JSON, this is a data representation of the
+            message (parsed JSON).
 
         Returns
         -------
@@ -248,12 +252,7 @@ class RouterRule:
         if not self.jmespath:
             return [message_body]
 
-        try:
-            message_json = json.loads(message_body)
-        except json.decoder.JSONDecodeError:
-            return []
-
-        result = self.jmespath_expr.search(message_json)
+        result = self.jmespath_expr.search(message_data)
 
         if isinstance(result, list):
             return self.flatten_list(result)
@@ -262,7 +261,7 @@ class RouterRule:
 
         return [result]
 
-    def is_data_match(self, message_body: str) -> bool:
+    def is_data_match(self, message_body: str, message_data: dict) -> bool:
         """
         Check if the message content matches a regular expression.
 
@@ -270,16 +269,19 @@ class RouterRule:
         ----------
         message_body : str
             The message body to be checked.
+        message_data : dict
+            If the message was JSON, this is a data representation of the
+            message (parsed JSON).
 
         Returns
         -------
         bool
             True if the message matches, otherwise False.
         """
-        data = self.get_data(message_body)
+        data = self.get_data(message_body, message_data)
         return any(self.prog.search(element) for element in data) if data else False
 
-    def is_match(self, source_topic_name: str, message_body: str) -> tuple:
+    def is_match(self, source_topic_name: str, message_body: str, message_data: dict) -> tuple:
         """
         Check if the provided message and source topics match this rule.
 
@@ -289,6 +291,9 @@ class RouterRule:
             The name of the topic that this message was consumed from.
         message_body : str
             The message body as a string.
+        message_data : dict
+            If the message was JSON, this is a data representation of the
+            message (parsed JSON).
 
         Returns
         -------
@@ -299,7 +304,7 @@ class RouterRule:
             - The destination topics
         """
         if source_topic_name == self.source_topic:
-            if not self.regexp or self.is_data_match(message_body):
+            if not self.regexp or self.is_data_match(message_body, message_data):
                 return True, self.destination_namespaces, self.destination_topics
 
         return False, None, None
@@ -621,6 +626,16 @@ class ServiceBusHandler:
         for rule in self.rules:
             self.rules_by_topic[rule.source_topic].append(rule)
 
+    async def _create_receiver(self, topic_name: str, subscription_name: str, max_renew: int) -> ServiceBusReceiver:
+        """Create and return a receiver (no side effects)."""
+        return await self.get_receiver(topic_name, subscription_name, max_renew)
+
+    async def _drain_receiver(self, receiver: ServiceBusReceiver, topic_name: str, subscription_name: str) -> None:
+        """Consume and process all messages from a receiver context."""
+        async with receiver as r:
+            async for message in r:
+                await self.process_message(topic_name, message, r)
+
     async def close(self):
         """Gracefully close all clients and senders."""
         logger.warning('Closing all connections on shutdown.')
@@ -651,7 +666,7 @@ class ServiceBusHandler:
                 max_wait_time=5,
                 prefetch_count=self.config.get_prefetch_count()
             )
-            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
+            logger.debug(f'Created a session receiver for {topic_name}/{subscription_name}')
         else:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
@@ -752,12 +767,26 @@ class ServiceBusHandler:
         receiver : azure.servicebus.ServiceBusReceiver
             The receiver that the message came in on.
         """
+        def parse_json_message(message: str, source_topic: str) -> dict:
+            """Parse a JSON message, but only if required."""
+            needs_json = any(r.jmespath for r in self.rules_by_topic.get(source_topic, []))
+
+            if needs_json:
+                try:
+                    return json.loads(message)
+                except json.decoder.JSONDecodeError:
+                    pass
+
+            return None
+
         message_body = await extract_message_body(message)
+        message_data = parse_json_message(message_body, source_topic)
 
         for rule in self.rules_by_topic.get(source_topic, []):
             is_match, destination_namespaces, destination_topics = rule.is_match(
                 source_topic,
-                message_body
+                message_body,
+                message_data
             )
 
             if is_match:
@@ -769,7 +798,7 @@ class ServiceBusHandler:
                     await receiver.complete_message(message)
                     return
                 except Exception as e:
-                    logger.error(f'Failed to send message: {e}')
+                    logger.error(f'Failed to send message ({",".join(destination_namespaces)}): {e}')
                     await receiver.abandon_message(message)
                     return
 
@@ -795,17 +824,17 @@ class ServiceBusHandler:
 
         while True:
             try:
-                async with await self.get_receiver(topic_name, subscription_name, max_renew) as receiver:
-                    async for message in receiver:
-                        await self.process_message(
-                            topic_name,
-                            message,
-                            receiver,
-                        )
+                receiver = await self._create_receiver(topic_name, subscription_name, max_renew)
+                await self._drain_receiver(receiver, topic_name, subscription_name)
+            except asyncio.CancelledError:
+                logger.debug(f'Cancelled receive loop for {topic_name}/{subscription_name}.')
+                return
             except OperationTimeoutError:
                 logger.debug(f'Timed out on {topic_name}/{subscription_name}.')
+                # loop continues and recreates receiver
             except Exception as e:
                 logger.error(f'Unknown exception {e} on {topic_name}/{subscription_name}.')
+                # continue loop; transient errors will retry
 
     async def run(self):
         """Start all receivers."""
@@ -886,12 +915,15 @@ async def main():
             logger.warning('Shutdown signal received. Cleaning up...')
             stop_event.set()
 
-        loop.add_signal_handler(signal.SIGTERM, shutdown)
-        loop.add_signal_handler(signal.SIGINT, shutdown)  # Handle CTRL+C
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(signal.SIGTERM, shutdown)
 
-        await handler.run()  # Start processing messages
+        run_task = asyncio.create_task(handler.run())
         await stop_event.wait()  # Wait for shutdown signal
+        run_task.cancel()
 
+        with contextlib.suppress(asyncio.CancelledError):
+            await run_task
     finally:
         await handler.close()  # Ensure all connections are properly closed
 
