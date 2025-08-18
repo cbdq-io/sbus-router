@@ -769,7 +769,7 @@ class ServiceBusHandler:
                     await receiver.complete_message(message)
                     return
                 except Exception as e:
-                    logger.error(f'Failed to send message: {e}')
+                    logger.error(f'Failed to send message ({",".join(destination_namespaces)}): {e}')
                     await receiver.abandon_message(message)
                     return
 
