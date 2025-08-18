@@ -229,7 +229,7 @@ class RouterRule:
                 flat_list.append(item)
         return flat_list
 
-    def get_data(self, message_body: str) -> list:
+    def get_data(self, message_body: str, message_data: dict) -> list:
         """
         Extract the relevant data from the message body for rule evaluation.
 
@@ -239,6 +239,9 @@ class RouterRule:
         ----------
         message_body : str
             The message body as a string.
+        message_data : dict
+            If the message was JSON, this is a data representation of the
+            message (parsed JSON).
 
         Returns
         -------
@@ -248,12 +251,7 @@ class RouterRule:
         if not self.jmespath:
             return [message_body]
 
-        try:
-            message_json = json.loads(message_body)
-        except json.decoder.JSONDecodeError:
-            return []
-
-        result = self.jmespath_expr.search(message_json)
+        result = self.jmespath_expr.search(message_data)
 
         if isinstance(result, list):
             return self.flatten_list(result)
@@ -262,7 +260,7 @@ class RouterRule:
 
         return [result]
 
-    def is_data_match(self, message_body: str) -> bool:
+    def is_data_match(self, message_body: str, message_data: dict) -> bool:
         """
         Check if the message content matches a regular expression.
 
@@ -270,16 +268,19 @@ class RouterRule:
         ----------
         message_body : str
             The message body to be checked.
+        message_data : dict
+            If the message was JSON, this is a data representation of the
+            message (parsed JSON).
 
         Returns
         -------
         bool
             True if the message matches, otherwise False.
         """
-        data = self.get_data(message_body)
+        data = self.get_data(message_body, message_data)
         return any(self.prog.search(element) for element in data) if data else False
 
-    def is_match(self, source_topic_name: str, message_body: str) -> tuple:
+    def is_match(self, source_topic_name: str, message_body: str, message_data: dict) -> tuple:
         """
         Check if the provided message and source topics match this rule.
 
@@ -289,6 +290,9 @@ class RouterRule:
             The name of the topic that this message was consumed from.
         message_body : str
             The message body as a string.
+        message_data : dict
+            If the message was JSON, this is a data representation of the
+            message (parsed JSON).
 
         Returns
         -------
@@ -299,7 +303,7 @@ class RouterRule:
             - The destination topics
         """
         if source_topic_name == self.source_topic:
-            if not self.regexp or self.is_data_match(message_body):
+            if not self.regexp or self.is_data_match(message_body, message_data):
                 return True, self.destination_namespaces, self.destination_topics
 
         return False, None, None
@@ -752,12 +756,26 @@ class ServiceBusHandler:
         receiver : azure.servicebus.ServiceBusReceiver
             The receiver that the message came in on.
         """
+        def parse_json_message(message: str, source_topic: str) -> dict:
+            """Parse a JSON message, but only if required."""
+            needs_json = any(r.jmespath for r in self.rules_by_topic.get(source_topic, []))
+
+            if needs_json:
+                try:
+                    return json.loads(message)
+                except json.decoder.JSONDecodeError:
+                    pass
+
+            return None
+
         message_body = await extract_message_body(message)
+        message_data = parse_json_message(message_body, source_topic)
 
         for rule in self.rules_by_topic.get(source_topic, []):
             is_match, destination_namespaces, destination_topics = rule.is_match(
                 source_topic,
-                message_body
+                message_body,
+                message_data
             )
 
             if is_match:
