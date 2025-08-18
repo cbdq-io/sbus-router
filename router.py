@@ -626,6 +626,16 @@ class ServiceBusHandler:
         for rule in self.rules:
             self.rules_by_topic[rule.source_topic].append(rule)
 
+    async def _create_receiver(self, topic_name: str, subscription_name: str, max_renew: int) -> ServiceBusReceiver:
+        """Create and return a receiver (no side effects)."""
+        return await self.get_receiver(topic_name, subscription_name, max_renew)
+
+    async def _drain_receiver(self, receiver: ServiceBusReceiver, topic_name: str, subscription_name: str) -> None:
+        """Consume and process all messages from a receiver context."""
+        async with receiver as r:
+            async for message in r:
+                await self.process_message(topic_name, message, r)
+
     async def close(self):
         """Gracefully close all clients and senders."""
         logger.warning('Closing all connections on shutdown.')
@@ -814,19 +824,17 @@ class ServiceBusHandler:
 
         while True:
             try:
-                async with await self.get_receiver(topic_name, subscription_name, max_renew) as receiver:
-                    async for message in receiver:
-                        await self.process_message(
-                            topic_name,
-                            message,
-                            receiver,
-                        )
+                receiver = await self._create_receiver(topic_name, subscription_name, max_renew)
+                await self._drain_receiver(receiver, topic_name, subscription_name)
             except asyncio.CancelledError:
-                break
+                logger.debug(f'Cancelled receive loop for {topic_name}/{subscription_name}.')
+                return
             except OperationTimeoutError:
                 logger.debug(f'Timed out on {topic_name}/{subscription_name}.')
+                # loop continues and recreates receiver
             except Exception as e:
                 logger.error(f'Unknown exception {e} on {topic_name}/{subscription_name}.')
+                # continue loop; transient errors will retry
 
     async def run(self):
         """Start all receivers."""
