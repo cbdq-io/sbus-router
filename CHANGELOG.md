@@ -5,6 +5,8 @@
 
 ### Fix
 
+* Cleaner shutdown. [Ben Dalling]
+
 * Provide the destination when marking sending as failed. [Ben Dalling]
 
 ### Performance
