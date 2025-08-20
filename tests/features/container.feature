@@ -8,10 +8,11 @@ Feature: Test the Container
         And the TestInfra file group is appuser
 
         Examples:
-            | path                           |
-            | /home/appuser/nukedlq.py       |
-            | /home/appuser/rule-schema.json |
-            | /home/appuser/router.py        |
+            | path                                 |
+            | /home/appuser/nukedlq.py             |
+            | /home/appuser/rule-schema.json       |
+            | /home/appuser/router.py              |
+            | /usr/local/router/examples/custom.py |
 
     Scenario Outline: Python Packages
         Given the TestInfra host with URL "docker://router" is ready

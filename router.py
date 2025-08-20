@@ -44,6 +44,7 @@ import signal
 import sys
 import time
 from collections import defaultdict
+from contextlib import suppress
 from string import Template
 
 import jmespath
@@ -92,14 +93,14 @@ logging.basicConfig(
 )
 logger = get_logger(__file__)
 custom_sender_string = os.getenv('ROUTER_CUSTOM_SENDER')
+custom_sender = None
+custom_sender_shutdown = None
 
 if custom_sender_string:
     logger.info(f'Configuring custom sender "{custom_sender_string}".')
     module_path, func_name = custom_sender_string.split(':')
-    module = importlib.import_module(module_path)
-    custom_sender = getattr(module, func_name)
-else:
-    custom_sender = None
+    custom_sender_module = importlib.import_module(module_path)
+    custom_sender = getattr(custom_sender_module, func_name)
 
 
 async def extract_message_body(message: ServiceBusMessage) -> str:
@@ -636,20 +637,44 @@ class ServiceBusHandler:
             async for message in r:
                 await self.process_message(topic_name, message, r)
 
+    async def _maybe_shutdown_custom_sender(self):
+        """Call custom sender's async close() if defined."""
+        if custom_sender_module and hasattr(custom_sender_module, 'close'):
+            try:
+                logger.info('Shutting down the custom sender....')
+                await custom_sender_module.close()
+            except Exception as e:
+                logger.error(f'Error during custom-sender close(): {e}')
+        else:
+            logger.debug('The custom sender has no close method.')
+
+        async def _close_many(self, items):
+            """Close a collection of async-closeable objects."""
+            if not items:
+                return
+            await asyncio.gather(*(item.close() for item in items), return_exceptions=True)
+
+    async def _cancel_tasks(self, tasks: list[asyncio.Task]):
+        """Cancel tasks and wait for them to finish."""
+        if not tasks:
+            return
+        for t in tasks:
+            t.cancel()
+        with suppress(asyncio.CancelledError):
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def close(self):
         """Gracefully close all clients and senders."""
         logger.warning('Closing all connections on shutdown.')
 
-        await asyncio.gather(*(sender.close() for sender in self.senders.values()))
-        await asyncio.gather(*(client.close() for client in self.clients.values()))
+        await self._maybe_shutdown_custom_sender()
+        await asyncio.gather(*(s.close() for s in self.senders.values()), return_exceptions=True)
+        await asyncio.gather(*(c.close() for c in self.clients.values()), return_exceptions=True)
         self.shutdown_event.set()
 
-        for task in self.keep_alive_tasks:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        for t in self.keep_alive_tasks:
+            t.cancel()
+        await asyncio.gather(*self.keep_alive_tasks, return_exceptions=True)
 
         if self.source_client:
             await self.source_client.close()

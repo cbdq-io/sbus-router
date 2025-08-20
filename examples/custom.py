@@ -1,12 +1,46 @@
-"""An example of a custom sender for the Service Bus Router."""
+"""
+An example custom sender with batching and at-least-once semantics.
+
+This module defines a buffered custom sender for Azure Service Bus that
+computes a session ID from a Kafka key and batches outgoing messages
+for efficiency, while still preserving at-least-once delivery semantics.
+
+The router calls `custom_sender` once per message. The function will not
+return until the message has been successfully sent to Service Bus (or an
+exception has been raised). This ensures that the router will only mark
+the message as completed after actual delivery.
+
+It is assumed that traffic received from Service Bus has been sent via
+<https://github.com/cbdq-io/kc-connectors/tree/develop/azure-servicebus-sink-connector>
+and therefore has a default of __kafka_key as the seed for configuring
+the session ID.
+
+Environment Variables
+---------------------
+CUSTOM_BUFFER_MAX_WAIT_MS : int, optional
+    Maximum wait time in milliseconds before flushing a batch.
+    Default is 25 ms.
+CUSTOM_BUFFER_MAX_MESSAGES : int, optional
+    Maximum number of messages per batch before flushing.
+    Default is 100.
+CUSTOM_SESSION_ID_FAN_SIZE : int, optional
+    Maximum size of an integer session ID.
+    Default is 10.
+CUSTOM_SESSION_PROPERTY_SEED : str, optional
+    The application key to use as a seed for generating the
+    session ID.
+    Default is __kafka_key
+"""
 import asyncio
 import contextlib
+import hashlib
 import os
 from typing import Dict, Optional, Tuple
 
 from azure.servicebus import ServiceBusMessage
 from azure.servicebus.aio import ServiceBusSender
 
+_FAN_SIZE = int(os.getenv('CUSTOM_SESSION_ID_FAN_SIZE', '10'))
 _MAX_WAIT_MS = int(os.getenv('CUSTOM_BUFFER_MAX_WAIT_MS', '25'))
 _MAX_MSGS = int(os.getenv('CUSTOM_BUFFER_MAX_MESSAGES', '100'))
 
@@ -217,23 +251,40 @@ async def close():
 
 async def custom_sender(sender: ServiceBusSender, topic_name: str, message_body: object, application_properties: dict):
     """
-    Send messages to the ie.topic with a session ID.
+    Implement a custom sender for Service Bus messages with session assignment and batching.
 
-    For all other topics, no session ID is required.
+    Computes a session ID from the specified application property, creates a
+    `ServiceBusMessage`, and enqueues it into a buffer for batched sending.
+    The function only returns after the specific message has been successfully
+    sent.
 
     Parameters
     ----------
     sender : ServiceBusSender
-        The sender to use to send the message.
-    message_body : str | bytes
-        The message body that is to be sent to the topic.
-    application_properties : dict | None
-        An optional set of properties that may have been set on the source message.
+        The Service Bus sender to use for sending the message.
+    topic_name : str
+        The name of the topic to which the message will be sent.
+    message_body : object
+        The body of the message. Can be str, bytes, or JSON-serializable object.
+    application_properties : dict
+        Application properties from the original message. Used to compute the
+        session ID.
+
+    Raises
+    ------
+    Exception
+        If sending the message fails, the exception is propagated to the caller.
     """
-    if sender.entity_name == 'ie.topic':
-        msg = ServiceBusMessage(body=message_body, application_properties=application_properties, session_id='0')
-    else:
-        msg = ServiceBusMessage(body=message_body, application_properties=application_properties)
+    seed_property_name = os.getenv('CUSTOM_SESSION_PROPERTY_SEED', '__kafka_key').encode()
+    seed = str(application_properties.get(seed_property_name))
+    i = int(hashlib.md5(seed.encode(), usedforsecurity=False).hexdigest(), 16)
+    session_id = str(i % _FAN_SIZE)
+
+    msg = ServiceBusMessage(
+        body=message_body,
+        application_properties=application_properties,
+        session_id=session_id,
+    )
 
     buf = await _get_buffer(sender)
     await buf.add_and_wait(msg)

@@ -1,6 +1,17 @@
 # Changelog
 
 
+## Unreleased
+
+### Features
+
+* Allow a hook to "close" resources in any custom sender. [Ben Dalling]
+
+### Documentation
+
+* Give examples of buffered sending in custom senders. [Ben Dalling]
+
+
 ## 0.9.1 (2025-08-20)
 
 ### Fix
