@@ -11,6 +11,8 @@
 
 ### Build
 
+* Correctly label release 0.10.0 as 0.9.1. [Ben Dalling]
+
 * Release/0.10.0. [Ben Dalling]
 
 ### Performance
