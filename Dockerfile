@@ -15,7 +15,9 @@ RUN apt-get update \
     --uid 1000 \
     --gid 1000 \
     --comment 'Application User' \
-    --shell /usr/sbin/nologin appuser
+    --shell /usr/sbin/nologin appuser \
+  && mkdir -p /usr/local/router/examples \
+  && chown appuser:appuser /usr/local/router/examples
 
 USER appuser
 WORKDIR /home/appuser
@@ -28,5 +30,6 @@ RUN pip install --no-cache-dir -r requirements.txt --user
 COPY --chown=appuser:appuser --chmod=0644 rule-schema.json /home/appuser/rule-schema.json
 COPY --chown=appuser:appuser --chmod=0755 router.py /home/appuser/router.py
 COPY --chown=appuser:appuser --chmod=0755 nukedlq.py /home/appuser/nukedlq.py
+COPY --chown=appuser:appuser --chmod=655 examples/custom.py /usr/local/router/examples/custom.py
 
 ENTRYPOINT [ "/home/appuser/router.py" ]
