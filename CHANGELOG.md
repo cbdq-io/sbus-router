@@ -1,13 +1,19 @@
 # Changelog
 
 
-## Unreleased
+## 0.9.1 (2025-08-20)
 
 ### Fix
 
 * Cleaner shutdown. [Ben Dalling]
 
 * Provide the destination when marking sending as failed. [Ben Dalling]
+
+### Build
+
+* Correctly label release 0.10.0 as 0.9.1. [Ben Dalling]
+
+* Release/0.10.0. [Ben Dalling]
 
 ### Performance
 
