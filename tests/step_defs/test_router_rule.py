@@ -74,8 +74,16 @@ def _(max_auto_renew_duration: int, router_rule: RouterRule):
 def _(is_match: str, router_rule: RouterRule, message_contents: str, source_topic: str):
     """the RouterRule match is <is_match>."""
     expected_value = is_match.capitalize() == 'True'
-    (actual_value, _, _) = router_rule.is_match(source_topic, message_contents)
+
+    try:
+        message_data = json.loads(message_contents)
+    except Exception:
+        message_data = None
+
+    (actual_value, _, _) = router_rule.is_match(source_topic, message_contents, message_data)
     assert expected_value == actual_value
+    assert router_rule.flatten_list(['foo', ['bar']]) == ['foo', 'bar']
+    assert router_rule.flatten_list([0]) == [0]
 
 
 @then('the SystemExit is 2')

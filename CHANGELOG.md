@@ -3,6 +3,23 @@
 
 ## Unreleased
 
+### Fix
+
+* Cleaner shutdown. [Ben Dalling]
+
+* Provide the destination when marking sending as failed. [Ben Dalling]
+
+### Build
+
+* Release/0.10.0. [Ben Dalling]
+
+### Performance
+
+* Only parse JSON messages once. [Ben Dalling]
+
+
+## 0.9.0 (2025-07-23)
+
 ### Features
 
 * Allow specification of max_auto_renew_duration in rules. [Ben Dalling]
