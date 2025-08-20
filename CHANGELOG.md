@@ -1,7 +1,7 @@
 # Changelog
 
 
-## Unreleased
+## 0.9.1 (2025-08-20)
 
 ### Features
 
