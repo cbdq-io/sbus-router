@@ -9,6 +9,10 @@
 
 * Provide the destination when marking sending as failed. [Ben Dalling]
 
+### Build
+
+* Release/0.10.0. [Ben Dalling]
+
 ### Performance
 
 * Only parse JSON messages once. [Ben Dalling]
