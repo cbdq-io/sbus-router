@@ -7,6 +7,10 @@
 
 * Allow a hook to "close" resources in any custom sender. [Ben Dalling]
 
+### Build
+
+* Release/0.10.0-alpha. [Ben Dalling]
+
 ### Documentation
 
 * Give examples of buffered sending in custom senders. [Ben Dalling]
