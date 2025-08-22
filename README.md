@@ -77,10 +77,9 @@ I/O.  The function MUST be defined to accept the following arguments:
 | application_properties | dict or None                          | Any properties that were set on the source message. |
 
 An example custom sender is implemented in the file
-`tests/resources/custom.py` with another available at
-`examples/custom.py`.  If there is an async function defined in the module
-file called `close` then this will be called (with no arguments) as part
-of the shutdown process.
+`tests/resources/custom.py`.  If there is an async function defined in the
+module file called `close` then this will be called (with no arguments) as
+part of the shutdown process.
 
 ## Useful External Links
 

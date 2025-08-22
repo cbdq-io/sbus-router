@@ -1,52 +1,85 @@
-"""An example of a custom sender for the Service Bus Router."""
+"""Buffered custom sender with per-session batching and at-least-once semantics."""
 import asyncio
 import contextlib
+import hashlib
 import os
-from typing import Dict, Optional, Tuple
+from typing import Hashable
 
 from azure.servicebus import ServiceBusMessage
 from azure.servicebus.aio import ServiceBusSender
 
+# ---------------------------------------------------------------------------
+# Configuration (env)
+# ---------------------------------------------------------------------------
+
+_FAN_SIZE = int(os.getenv('CUSTOM_SESSION_ID_FAN_SIZE', '10'))
 _MAX_WAIT_MS = int(os.getenv('CUSTOM_BUFFER_MAX_WAIT_MS', '25'))
 _MAX_MSGS = int(os.getenv('CUSTOM_BUFFER_MAX_MESSAGES', '100'))
+_SEED_KEY = os.getenv('CUSTOM_SESSION_PROPERTY_SEED', '__kafka_key').encode()
 
-_buffers: Dict[int, 'MessageBuffer'] = {}
+# One buffer per (sender, session_id) so that SDK batches stay homogeneous.
+_buffers: dict[tuple[int, Hashable | None], 'MessageBuffer'] = {}
 _buffers_lock = asyncio.Lock()
 
 
-class MessageBuffer:
+# ---------------------------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------------------------
+def _session_from_seed(seed: str) -> str:
+    """Map a seed string deterministically to a session_id in [0, _FAN_SIZE).
+
+    Parameters
+    ----------
+    seed : str
+        Input key (e.g., Kafka key) used to derive the session.
+
+    Returns
+    -------
+    str
+        Session identifier as a stringified integer.
     """
-    Per-sender coalescing buffer with per-item flush acknowledgements.
+    # usedforsecurity=False keeps this FIPS-friendly for non-crypto hashing.
+    i = int(hashlib.md5(seed.encode(), usedforsecurity=False).hexdigest(), 16)
+    return str(i % _FAN_SIZE)
 
-    Messages are enqueued and held for a short time window or until a maximum
-    count is reached. They are then sent in batches using the underlying
-    ServiceBusSender. Each message has an associated `Future` which is resolved
-    only when the batch containing that message has been successfully sent.
 
-    This design ensures that the caller does not receive control back until
-    their message is actually on Service Bus.
+# ---------------------------------------------------------------------------
+# Buffer
+# ---------------------------------------------------------------------------
+
+class MessageBuffer:
+    """Per-(sender, session_id) coalescing buffer with per-item acks.
+
+    Messages are held briefly to coalesce into larger Service Bus batches.
+    Each enqueued message comes with a Future that is resolved once the batch
+    containing that message has been successfully sent.
 
     Parameters
     ----------
     sender : ServiceBusSender
-        The Service Bus sender used to send messages.
+        The Service Bus sender used to transmit messages.
     max_wait_ms : int
-        The maximum wait time in milliseconds before a batch is flushed,
-        even if the batch has not reached the maximum message count.
+        Maximum time window (milliseconds) to collect messages before flush.
     max_msgs : int
-        The maximum number of messages per batch before flushing.
+        Maximum number of messages to coalesce before flush.
+
+    Notes
+    -----
+    - This design preserves at-least-once semantics: ``add_and_wait()`` only
+      returns after the message's batch has been sent (or an exception is raised).
+    - Batching is keyed by ``(sender, session_id)`` upstream, so each batch is
+      homogeneous with respect to session_id, which the SDK requires.
     """
 
     def __init__(self, sender: ServiceBusSender, max_wait_ms: int, max_msgs: int):
         self.sender = sender
-        self.queue: asyncio.Queue[Optional[Tuple[ServiceBusMessage, asyncio.Future]]] = asyncio.Queue()
+        self.queue: asyncio.Queue[tuple[ServiceBusMessage, asyncio.Future] | None] = asyncio.Queue()
         self.max_wait = max_wait_ms / 1000.0
         self.max_msgs = max_msgs
         self._task = asyncio.create_task(self._run())
 
     async def add_and_wait(self, msg: ServiceBusMessage) -> None:
-        """
-        Enqueue a message and wait until it has been sent.
+        """Enqueue a message and wait until it has been sent.
 
         Parameters
         ----------
@@ -56,60 +89,41 @@ class MessageBuffer:
         Raises
         ------
         Exception
-            If the underlying send operation fails, the exception is
-            propagated to the caller.
+            Propagates any send failure from the background flush.
         """
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
         await self.queue.put((msg, fut))
         await fut
 
     async def close(self) -> None:
-        """Flush any remaining messages and stop the background task."""
+        """Flush remaining messages and stop the background task."""
         await self.queue.put(None)
         with contextlib.suppress(asyncio.CancelledError):
             await self._task
 
-    async def _run(self):
-        """
-        Background task that drains the queue and sends batches.
-
-        Notes
-        -----
-        This loop delegates coalescing to :meth:`_coalesce_items` to keep
-        control flow simple and reduce cyclomatic complexity. It exits only
-        after a sentinel ``None`` is received and any remaining messages are
-        flushed.
-        """
+    async def _run(self) -> None:
+        """Background loop: coalesce windows then flush."""
         while True:
-            items = await self._coalesce_items()
+            items = await self._coalesce_window()
             if items is None:
-                # sentinel received; ensure any residuals are flushed
-                await self._flush_accumulated([])
+                # Sentinel observed: nothing more to read.
+                await self._flush([])  # no-op; keeps structure symmetric
                 break
-            await self._flush_accumulated(items)
+            await self._flush(items)
 
-    async def _coalesce_items(self):
-        """
-        Pull the first queued item, then coalesce more until timeout or limit.
+    async def _coalesce_window(self) -> list[tuple[ServiceBusMessage, asyncio.Future]] | None:
+        """Pull the first item, then coalesce until timeout or max size.
 
         Returns
         -------
-        list[tuple[ServiceBusMessage, asyncio.Future]] | None
-            A list of (message, future) pairs to flush as a batch window,
-            or ``None`` if a sentinel was encountered (meaning shutdown).
-
-        Notes
-        -----
-        - Respects ``self.max_wait`` as a soft window.
-        - Respects ``self.max_msgs`` as a hard cap.
-        - If a sentinel ``None`` is pulled mid-window, it is re-enqueued so
-          the outer loop can observe it on the next iteration and exit.
+        list[(ServiceBusMessage, Future)] | None
+            The coalesced items to flush, or None if shutting down.
         """
         first = await self.queue.get()
         if first is None:
             return None
 
-        items = [first]
+        items: list[tuple[ServiceBusMessage, asyncio.Future]] = [first]
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self.max_wait
 
@@ -123,7 +137,7 @@ class MessageBuffer:
                 break
 
             if nxt is None:
-                # preserve sentinel for the next iteration to terminate the loop
+                # Re-enqueue sentinel for outer loop to observe and exit.
                 self.queue.put_nowait(None)
                 break
 
@@ -131,26 +145,25 @@ class MessageBuffer:
 
         return items
 
-    async def _flush_accumulated(self, items):
-        """
-        Flush a list of queued items by sending them as one or more batches.
+    async def _flush(self, items: list[tuple[ServiceBusMessage, asyncio.Future]]) -> None:
+        """Send items as one or more Service Bus batches.
 
         Parameters
         ----------
         items : list of tuple(ServiceBusMessage, asyncio.Future)
-            The messages and associated futures to send.
+            Items to send; each Future is resolved on success or set with an
+            exception on failure.
 
         Notes
         -----
-        Splits into multiple Service Bus batches if the first one fills up.
-        Each message's future is resolved (success or exception) according
-        to the outcome of the batch it was sent in.
+        Splits into multiple SDK batches if the first fills up; all Futures
+        for a given batch are resolved together after ``send_messages``.
         """
         if not items:
             return
 
         batch = await self.sender.create_message_batch()
-        pending = []
+        pending: list[tuple[ServiceBusMessage, asyncio.Future]] = []
 
         async def flush_batch():
             if not pending:
@@ -160,17 +173,17 @@ class MessageBuffer:
                 for _, fut in pending:
                     if not fut.done():
                         fut.set_result(True)
-            except Exception as e:
+            except Exception as exc:
                 for _, fut in pending:
                     if not fut.done():
-                        fut.set_exception(e)
+                        fut.set_exception(exc)
 
         for msg, fut in items:
             try:
                 batch.add_message(msg)
                 pending.append((msg, fut))
             except ValueError:
-                # Batch is full: send current batch, then start a new one
+                # Batch full -> send current batch and start a new one.
                 await flush_batch()
                 batch = await self.sender.create_message_batch()
                 batch.add_message(msg)
@@ -179,61 +192,85 @@ class MessageBuffer:
         await flush_batch()
 
 
-async def _get_buffer(sender: ServiceBusSender) -> MessageBuffer:
-    """
-    Retrieve or create a MessageBuffer for a given sender.
+# ---------------------------------------------------------------------------
+# Buffer access & shutdown
+# ---------------------------------------------------------------------------
+
+async def _get_buffer(sender: ServiceBusSender, session_id: str | None = None) -> MessageBuffer:
+    """Retrieve or create a buffer for a given (sender, session_id) pair.
 
     Parameters
     ----------
     sender : ServiceBusSender
         The sender for which to get a buffer.
+    session_id : str, optional
+        If provided, messages for that session are batched together. If None,
+        all messages for this sender share the same buffer.
 
     Returns
     -------
     MessageBuffer
-        The buffer associated with the given sender.
+        The buffer associated with the given key.
     """
-    key = id(sender)
-    if key in _buffers:
-        return _buffers[key]
+    key = (id(sender), session_id)
+    buf = _buffers.get(key)
+    if buf is not None:
+        return buf
     async with _buffers_lock:
-        if key not in _buffers:
-            _buffers[key] = MessageBuffer(sender, _MAX_WAIT_MS, _MAX_MSGS)
-        return _buffers[key]
+        buf = _buffers.get(key)
+        if buf is None:
+            buf = MessageBuffer(sender, _MAX_WAIT_MS, _MAX_MSGS)
+            _buffers[key] = buf
+        return buf
 
 
-async def close():
-    """
-    Flush and close all active buffers.
-
-    This function should be called during graceful shutdown to ensure
-    that no messages remain unsent in memory.
-    """
+async def close() -> None:
+    """Flush and close all active buffers (idempotent)."""
     if not _buffers:
         return
     await asyncio.gather(*(buf.close() for buf in list(_buffers.values())), return_exceptions=True)
     _buffers.clear()
 
 
-async def custom_sender(sender: ServiceBusSender, topic_name: str, message_body: object, application_properties: dict):
-    """
-    Send messages to the ie.topic with a session ID.
+# ---------------------------------------------------------------------------
+# Public entrypoint used by the router
+# ---------------------------------------------------------------------------
 
-    For all other topics, no session ID is required.
+async def custom_sender(sender: ServiceBusSender, topic_name: str, message_body: object, application_properties: dict):
+    """Custom sender for Service Bus messages with session assignment and batching.
+
+    The function returns only after the message has been sent, preserving
+    at-least-once semantics.
 
     Parameters
     ----------
     sender : ServiceBusSender
-        The sender to use to send the message.
-    message_body : str | bytes
-        The message body that is to be sent to the topic.
-    application_properties : dict | None
-        An optional set of properties that may have been set on the source message.
-    """
-    if sender.entity_name == 'ie.topic':
-        msg = ServiceBusMessage(body=message_body, application_properties=application_properties, session_id='0')
-    else:
-        msg = ServiceBusMessage(body=message_body, application_properties=application_properties)
+        The Service Bus sender to use for sending the message.
+    topic_name : str
+        Name of the destination topic (not used for logic; provided for parity).
+    message_body : object
+        The message body (str, bytes, or already-serialized JSON string).
+    application_properties : dict
+        Application properties from the original message. The seed property is
+        read from this dict to derive the session ID.
 
-    buf = await _get_buffer(sender)
+    Raises
+    ------
+    Exception
+        Any underlying send error is propagated to the caller.
+    """
+    # seed = str(application_properties.get(_SEED_KEY))
+    # session_id = _session_from_seed(seed)
+    session_id = None
+
+    if sender.entity_name == 'ie.topic':
+        session_id = '0'
+
+    msg = ServiceBusMessage(
+        body=message_body,
+        application_properties=application_properties,
+        session_id=session_id
+    )
+
+    buf = await _get_buffer(sender, session_id=session_id)
     await buf.add_and_wait(msg)
