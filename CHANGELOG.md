@@ -11,6 +11,8 @@
 
 ### Documentation
 
+* Add batch settings to the documentation. [Ben Dalling]
+
 * Give examples of buffered sending in custom senders. [Ben Dalling]
 
 ### Performance
