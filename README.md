@@ -67,8 +67,8 @@ The environment variable `ROUTER_CUSTOM_TRANSFORMER` can be set to configure a
 custom transformer.  `ROUTER_CUSTOM_TRANSFORMER` must be a colon (`:`)
 separated value of two items where the first item is the path to a Python
 script and the second is the name of a function in the Python script to be
-called (e.g. `custom:transorm` will call a function called
-`transorm` in a script called `custom.py`).  The function MUST be defined
+called (e.g. `custom:transform` will call a function called
+`transform` in a script called `custom.py`).  The function MUST be defined
 to accept the following arguments:
 
 | Type                                   | Description                                             |
@@ -78,7 +78,7 @@ to accept the following arguments:
 | logging.Logger                         | A logger in case one wants to track the transformation. |
 
 An example custom transformer is implemented in the file
-`tests/resources/custom.py`.  Please note that the trasnformer function MUST
+`tests/resources/custom.py`.  Please note that the transformer function MUST
 not incur any I/O.  It also MUST return an azure.servicebus.ServiceBusMessage
 
 ## Useful External Links
