@@ -9,6 +9,10 @@
 
 * Allow a hook to "close" resources in any custom sender. [Ben Dalling]
 
+### Build
+
+* Release/0.10.0. [Ben Dalling]
+
 ### Documentation
 
 * Add batch settings to the documentation. [Ben Dalling]
