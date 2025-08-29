@@ -36,6 +36,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 import asyncio
 import contextlib
 import importlib
+import inspect
 import json
 import logging
 import os
@@ -45,6 +46,7 @@ import sys
 import time
 from collections import defaultdict
 from string import Template
+from typing import Callable, Optional
 
 import jmespath
 import jsonschema
@@ -57,7 +59,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '0.9.1'
+__version__ = '0.10.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -71,8 +73,7 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
     logger_name : str
         The name of the logger.
     log_level : str, optional
-        The log level to set the logger to, by
-        default os.getenv('LOG_LEVEL', 'WARN').
+        The log level to set the logger to, by default os.getenv('LOG_LEVEL', 'WARN').
 
     Returns
     -------
@@ -91,15 +92,29 @@ logging.basicConfig(
     )
 )
 logger = get_logger(__file__)
-custom_sender_string = os.getenv('ROUTER_CUSTOM_SENDER')
 
-if custom_sender_string:
-    logger.info(f'Configuring custom sender "{custom_sender_string}".')
-    module_path, func_name = custom_sender_string.split(':')
-    module = importlib.import_module(module_path)
-    custom_sender = getattr(module, func_name)
-else:
-    custom_sender = None
+# --------------------------------------------------------------------------------------
+# Optional: pure, synchronous message transformer
+# Configure with ROUTER_CUSTOM_TRANSFORMER="module:function"
+# Contract: def transform(msg: ServiceBusMessage, topic_name: str) -> ServiceBusMessage
+# No I/O, no await; either mutate and return the same instance or return a new one.
+# --------------------------------------------------------------------------------------
+_transformer: Optional[Callable[[ServiceBusMessage, str], ServiceBusMessage]] = None
+_transformer_module = None
+_transformer_spec = os.getenv('ROUTER_CUSTOM_TRANSFORMER')
+if _transformer_spec:
+    try:
+        module_path, func_name = _transformer_spec.split(':', 1)
+        _transformer_module = importlib.import_module(module_path)
+        candidate = getattr(_transformer_module, func_name)
+        if inspect.iscoroutinefunction(candidate):
+            raise TypeError('Custom transformer must be a synchronous function (no await).')
+        _transformer = candidate  # type: ignore[assignment]
+        logger.info(f'Configured custom transformer "{_transformer_spec}".')
+    except Exception as e:
+        logger.error(f'Failed to configure custom transformer "{_transformer_spec}": {e}')
+        _transformer = None
+        _transformer_module = None
 
 
 async def extract_message_body(message: ServiceBusMessage) -> str:
@@ -126,15 +141,12 @@ async def extract_message_body(message: ServiceBusMessage) -> str:
     body_type = message.body_type
 
     if body_type == AmqpMessageBodyType.DATA:
-        # Body is binary data (bytes or memoryview)
         return b''.join(message.body).decode()
 
     if body_type == AmqpMessageBodyType.SEQUENCE:
-        # Body is a sequence (list of values) -> Convert to a JSON string
         return json.dumps(message.body)
 
     if body_type == AmqpMessageBodyType.VALUE:
-        # Body is a single value (string, integer, JSON object) -> Convert to str
         return str(message.body)
 
     raise TypeError(f'Unsupported message body type: {body_type}')
@@ -192,11 +204,7 @@ class RouterRule:
         else:
             self.jmespath_expr = None
 
-        self.max_auto_renew_duration = parsed_definition.get(
-            'max_auto_renew_duration',
-            300
-        )
-
+        self.max_auto_renew_duration = parsed_definition.get('max_auto_renew_duration', 300)
         self.regexp = parsed_definition.get('regexp', None)
 
         if self.regexp:
@@ -225,12 +233,12 @@ class RouterRule:
         flat_list = []
         for item in data:
             if isinstance(item, list):
-                flat_list.extend(self.flatten_list(item))  # Recursively flatten it
+                flat_list.extend(self.flatten_list(item))
             else:
                 flat_list.append(item)
         return flat_list
 
-    def get_data(self, message_body: str, message_data: dict) -> list:
+    def get_data(self, message_body: str, message_data: Optional[dict]) -> list:
         """
         Extract the relevant data from the message body for rule evaluation.
 
@@ -240,9 +248,8 @@ class RouterRule:
         ----------
         message_body : str
             The message body as a string.
-        message_data : dict
-            If the message was JSON, this is a data representation of the
-            message (parsed JSON).
+        message_data : dict | None
+            If the message was JSON, this is a data representation of the message (parsed JSON).
 
         Returns
         -------
@@ -251,6 +258,9 @@ class RouterRule:
         """
         if not self.jmespath:
             return [message_body]
+
+        if message_data is None:
+            return []
 
         result = self.jmespath_expr.search(message_data)
 
@@ -261,7 +271,7 @@ class RouterRule:
 
         return [result]
 
-    def is_data_match(self, message_body: str, message_data: dict) -> bool:
+    def is_data_match(self, message_body: str, message_data: Optional[dict]) -> bool:
         """
         Check if the message content matches a regular expression.
 
@@ -269,19 +279,21 @@ class RouterRule:
         ----------
         message_body : str
             The message body to be checked.
-        message_data : dict
-            If the message was JSON, this is a data representation of the
-            message (parsed JSON).
+        message_data : dict | None
+            If the message was JSON, this is a data representation of the message (parsed JSON).
 
         Returns
         -------
         bool
             True if the message matches, otherwise False.
         """
+        if not self.prog:
+            return True
+
         data = self.get_data(message_body, message_data)
         return any(self.prog.search(element) for element in data) if data else False
 
-    def is_match(self, source_topic_name: str, message_body: str, message_data: dict) -> tuple:
+    def is_match(self, source_topic_name: str, message_body: str, message_data: Optional[dict]) -> tuple:
         """
         Check if the provided message and source topics match this rule.
 
@@ -291,22 +303,16 @@ class RouterRule:
             The name of the topic that this message was consumed from.
         message_body : str
             The message body as a string.
-        message_data : dict
-            If the message was JSON, this is a data representation of the
-            message (parsed JSON).
+        message_data : dict | None
+            If the message was JSON, this is a data representation of the message (parsed JSON).
 
         Returns
         -------
         tuple[bool, list, list]
-            A tuple containing:
-            - Whether the rule matches the message
-            - The destination namespaces
-            - The destination topics
+            (is_match, destination_namespaces, destination_topics)
         """
-        if source_topic_name == self.source_topic:
-            if not self.regexp or self.is_data_match(message_body, message_data):
-                return True, self.destination_namespaces, self.destination_topics
-
+        if source_topic_name == self.source_topic and self.is_data_match(message_body, message_data):
+            return True, self.destination_namespaces, self.destination_topics
         return False, None, None
 
     def name(self, name: str = None) -> str:
@@ -377,7 +383,7 @@ class ServiceBusNamespaces:
         Parameters
         ----------
         name : str
-            The name of the namespace (e.g. "gbdev").
+            The name of the namespace (e.g. 'gbdev').
         connection_string : str
             The connection string for connecting to the namespace.
         """
@@ -390,8 +396,7 @@ class ServiceBusNamespaces:
         Returns
         -------
         int
-            The count of service bus namespaces instances that have been
-            defined in the config.
+            The count of service bus namespaces instances that have been defined in the config.
         """
         return len(self._namespaces)
 
@@ -408,11 +413,6 @@ class ServiceBusNamespaces:
         -------
         str
             The connection string of the namespace.
-
-        Raises
-        ------
-        ValueError
-            If the provided name is not known.
         """
         return self._namespaces[name]
 
@@ -440,13 +440,12 @@ class EnvironmentConfigParser:
 
     def get_prefetch_count(self) -> int:
         """
-        Get the number of messages to be prefetch by the client.
+        Get the number of messages to be prefetched by the client.
 
         Returns
         -------
         int
-            The number of messages to be prefetched.  If not provided, then
-            the default is 100.
+            The number of messages to be prefetched. If not provided, default is 100.
         """
         return int(self._environ.get('ROUTER_PREFETCH_COUNT', '100'))
 
@@ -462,15 +461,12 @@ class EnvironmentConfigParser:
         Returns
         -------
         list
-            A list of list items, where each item contains two string
-            elements representing the key and the value.
+            A list of list items, where each item contains two string elements representing the key and the value.
         """
         response = []
-
         for key in sorted(self._environ.keys()):
             if key.startswith(prefix):
                 response.append([key, self._environ[key]])
-
         return response
 
     def get_prometheus_port(self) -> int:
@@ -497,20 +493,18 @@ class EnvironmentConfigParser:
             A list of RouterRule objects.
         """
         response = []
-
         for item in self.get_prefixed_values('ROUTER_RULE_'):
             name = item[0].replace('ROUTER_RULE_', '')
             template = Template(item[1])
             definition = template.safe_substitute(os.environ)
             response.append(RouterRule(name, definition))
-
         return response
 
     def get_source_connection_string(self) -> str:
         """Get the connection string of the source namespace."""
         return self._environ['ROUTER_SOURCE_CONNECTION_STRING']
 
-    def init_rules_usage(self) -> dict[str, Counter]:
+    def init_rules_usage(self) -> dict:
         """
         Initialise a dictionary representing the usage of all defined rules.
 
@@ -519,17 +513,14 @@ class EnvironmentConfigParser:
         Returns
         -------
         dict[str, Counter]
-            Each rule name will be a key to a value that is a Prometheus
-            Counter.
+            Each rule name will be a key to a value that is a Prometheus Counter.
         """
         response = {}
-
         for rule in self.get_rules():
             response[rule.name()] = Counter(
                 f'{rule.name()}_usage_count',
                 f'How often the {rule.name()} rule has been matched.'
             )
-
         return response
 
     def max_tasks(self) -> int:
@@ -567,22 +558,20 @@ class EnvironmentConfigParser:
 
         return response
 
-    def topics_and_subscriptions(self) -> list[tuple]:
+    def topics_and_subscriptions(self) -> list:
         """
-        Extract a dictionary of the source topics and subscriptions.
+        Extract a list of the source topics and subscriptions.
 
         Returns
         -------
         list[tuple]
-            A list of tuples.  Each tuple contains two elements.  The first
-            is the topic name, the second is the subscription name.
+            A list of tuples (topic_name, subscription_name, max_auto_renew_duration).
         """
         response = []
         rules = self.get_rules()
 
         for rule in rules:
             instance = (rule.source_topic, rule.source_subscription, rule.max_auto_renew_duration)
-
             if instance not in response:
                 response.append(instance)
 
@@ -599,10 +588,115 @@ class ServiceBusHandler:
         The configuration as set by environment variables.
     """
 
+    # -------------------------
+    # Batching configuration
+    # -------------------------
+    _BATCH_MAX_WAIT_MS = int(os.getenv('ROUTER_BATCH_MAX_WAIT_MS', '10'))
+    _BATCH_MAX_MESSAGES = int(os.getenv('ROUTER_BATCH_MAX_MESSAGES', '256'))
+
+    class _Batcher:
+        """
+        Per-destination coalescing buffer with per-item acknowledgements.
+
+        Queues tuples of (ServiceBusMessage, Future) and flushes them as one or
+        more Service Bus batches once either:
+          - max_wait has elapsed, or
+          - max_messages have been collected.
+
+        The Future resolves only after the send for the batch that contains
+        that message completes (success or exception).
+        """
+
+        def __init__(self, sender_factory: Callable, max_wait_ms: int, max_msgs: int, topic_name: str):
+            self.sender_factory = sender_factory
+            self.queue: asyncio.Queue[Optional[tuple[ServiceBusMessage, asyncio.Future]]] = asyncio.Queue()
+            self.max_wait = max_wait_ms / 1000.0
+            self.max_msgs = max_msgs
+            self.topic_name = topic_name
+            self._task = asyncio.create_task(self._run())
+            self._sender = None
+
+        async def add_and_wait(self, msg: ServiceBusMessage) -> None:
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
+            await self.queue.put((msg, fut))
+            await fut
+
+        async def close(self) -> None:
+            await self.queue.put(None)
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+        async def _run(self):
+            self._sender = await self.sender_factory()
+            while True:
+                items = await self._coalesce()
+                if items is None:
+                    # sentinel -> flush nothing further and exit
+                    await self._flush([])
+                    break
+                await self._flush(items)
+
+        async def _coalesce(self):
+            first = await self.queue.get()
+            if first is None:
+                return None
+
+            items = [first]
+            deadline = asyncio.get_running_loop().time() + self.max_wait
+
+            while len(items) < self.max_msgs:
+                timeout = deadline - asyncio.get_running_loop().time()
+                if timeout <= 0:
+                    break
+                try:
+                    nxt = await asyncio.wait_for(self.queue.get(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    break
+                if nxt is None:
+                    # re-queue sentinel for the outer loop to exit next round
+                    self.queue.put_nowait(None)
+                    break
+                items.append(nxt)
+
+            return items
+
+        async def _flush(self, items):
+            if not items:
+                return
+
+            batch = await self._sender.create_message_batch()
+            pending: list[tuple[ServiceBusMessage, asyncio.Future]] = []
+
+            async def flush_batch():
+                if not pending:
+                    return
+                try:
+                    await self._sender.send_messages(batch)
+                    for _, fut in pending:
+                        if not fut.done():
+                            fut.set_result(True)
+                except Exception as e:
+                    for _, fut in pending:
+                        if not fut.done():
+                            fut.set_exception(e)
+
+            for msg, fut in items:
+                try:
+                    batch.add_message(msg)
+                    pending.append((msg, fut))
+                except ValueError:
+                    # current batch full -> send and start a new one
+                    await flush_batch()
+                    batch = await self._sender.create_message_batch()
+                    batch.add_message(msg)
+                    pending = [(msg, fut)]
+
+            await flush_batch()
+
     def __init__(self, config: EnvironmentConfigParser):
         self.source_connection_string = config.get_source_connection_string()
         self.config = config
-        self.namespaces = config.service_bus_namespaces().get_all_namespaces()  # Used for sending, not receiving
+        self.namespaces = config.service_bus_namespaces().get_all_namespaces()  # For sending
         self.input_topics = config.topics_and_subscriptions()
         self.rules = config.get_rules()
         self.max_tasks = config.max_tasks()
@@ -612,11 +706,12 @@ class ServiceBusHandler:
             logger.info(f'Rule parsing order {idx} {rule.name()}')
 
         self.source_client = None  # Used for receiving
-        self.clients = {}  # Used for sending
-        self.senders = {}
+        self.clients = {}          # Used for sending (per destination namespace)
+        self.senders = {}          # Cache of senders keyed by (namespace, topic)
+        self.batchers: dict[tuple[str, str], ServiceBusHandler._Batcher] = {}
+
         self.lock_renewer = AutoLockRenewer()
         self.sender_locks = defaultdict(asyncio.Lock)
-        self.sender_send_locks = defaultdict(asyncio.Lock)
         self.rules_by_topic = defaultdict(list)
         self.rules_usage = config.init_rules_usage()
         self.keep_alive_tasks = []
@@ -626,31 +721,30 @@ class ServiceBusHandler:
         for rule in self.rules:
             self.rules_by_topic[rule.source_topic].append(rule)
 
-    async def _create_receiver(self, topic_name: str, subscription_name: str, max_renew: int) -> ServiceBusReceiver:
-        """Create and return a receiver (no side effects)."""
-        return await self.get_receiver(topic_name, subscription_name, max_renew)
+    async def _close_many(self, items):
+        if not items:
+            return
+        await asyncio.gather(*(item.close() for item in items), return_exceptions=True)
 
-    async def _drain_receiver(self, receiver: ServiceBusReceiver, topic_name: str, subscription_name: str) -> None:
-        """Consume and process all messages from a receiver context."""
-        async with receiver as r:
-            async for message in r:
-                await self.process_message(topic_name, message, r)
-
-    async def close(self):
-        """Gracefully close all clients and senders."""
+    async def close(self) -> None:
+        """Gracefully close all batchers, clients and senders."""
         logger.warning('Closing all connections on shutdown.')
 
-        await asyncio.gather(*(sender.close() for sender in self.senders.values()))
-        await asyncio.gather(*(client.close() for client in self.clients.values()))
-        self.shutdown_event.set()
+        # Close batchers first (flush buffered messages)
+        await self._close_many(getattr(self, 'batchers', {}).values())
 
+        # Close senders and destination clients
+        await self._close_many(self.senders.values())
+        await self._close_many(self.clients.values())
+
+        # Stop keep-alive tasks
+        self.shutdown_event.set()
         for task in self.keep_alive_tasks:
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
+        # Close the source client
         if self.source_client:
             await self.source_client.close()
 
@@ -666,7 +760,7 @@ class ServiceBusHandler:
                 max_wait_time=5,
                 prefetch_count=self.config.get_prefetch_count()
             )
-            logger.debug(f'Created a session receiver for {topic_name}/{subscription_name}')
+            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
         else:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
@@ -712,16 +806,18 @@ class ServiceBusHandler:
                 logger.error(f'Failed to enter sender context for {namespace}/{topic}: {e}')
                 raise
 
-            # Only store the sender after successful init
             self.senders[key] = sender
             return sender
+
+    def _get_transformer(self) -> Optional[Callable[[ServiceBusMessage, str], ServiceBusMessage]]:
+        """Return the configured synchronous transformer, if any."""
+        return _transformer
 
     def is_session_required(self, source_topic: str, source_subscription: str) -> bool:
         """Check if a source topic/subscription requires sessions or not."""
         for rule in self.rules:
             if rule.source_topic == source_topic and rule.source_subscription == source_subscription:
                 return rule.is_session_required
-
         return False
 
     async def keep_source_connection_alive(self, interval=240):
@@ -752,6 +848,17 @@ class ServiceBusHandler:
 
             await asyncio.sleep(interval)
 
+    @staticmethod
+    def _maybe_parse_json_for_topic(rules_for_topic: list, body: str) -> Optional[dict]:
+        """Parse a JSON message once per topic if any rule needs JSON."""
+        needs_json = any(r.jmespath for r in rules_for_topic)
+        if not needs_json:
+            return None
+        try:
+            return json.loads(body)
+        except json.decoder.JSONDecodeError:
+            return None
+
     @PROCESSING_TIME.time()
     async def process_message(self, source_topic: str, message: ServiceBusReceivedMessage,
                               receiver: ServiceBusReceiver):
@@ -762,27 +869,16 @@ class ServiceBusHandler:
         ----------
         source_topic : str
             The name of the topic where the message was received from.
-        message : azure.servicebus.ServiceBusMessage
+        message : ServiceBusReceivedMessage
             The message to be processed.
-        receiver : azure.servicebus.ServiceBusReceiver
+        receiver : ServiceBusReceiver
             The receiver that the message came in on.
         """
-        def parse_json_message(message: str, source_topic: str) -> dict:
-            """Parse a JSON message, but only if required."""
-            needs_json = any(r.jmespath for r in self.rules_by_topic.get(source_topic, []))
-
-            if needs_json:
-                try:
-                    return json.loads(message)
-                except json.decoder.JSONDecodeError:
-                    pass
-
-            return None
-
         message_body = await extract_message_body(message)
-        message_data = parse_json_message(message_body, source_topic)
+        rules_for_topic = self.rules_by_topic.get(source_topic, [])
+        message_data = self._maybe_parse_json_for_topic(rules_for_topic, message_body)
 
-        for rule in self.rules_by_topic.get(source_topic, []):
+        for rule in rules_for_topic:
             is_match, destination_namespaces, destination_topics = rule.is_match(
                 source_topic,
                 message_body,
@@ -793,8 +889,13 @@ class ServiceBusHandler:
                 try:
                     logger.debug(f'Successfully matched message to {rule.name()}.')
                     self.rules_usage[rule.name()].inc()
-                    await self.send_message(destination_namespaces, destination_topics, message_body,
-                                            message.application_properties)
+                    # Await per-item ack from the batcher before completing the input message
+                    await self.send_message(
+                        destination_namespaces,
+                        destination_topics,
+                        message_body,
+                        message.application_properties
+                    )
                     await receiver.complete_message(message)
                     return
                 except Exception as e:
@@ -816,6 +917,11 @@ class ServiceBusHandler:
             logger.error(f'Failed to send message to DLQ: {e}')
             await receiver.abandon_message(message)
 
+    async def _receive_loop(self, topic_name, subscription_name, receiver):
+        """Reduce complexity in receive_and_process."""
+        async for message in receiver:
+            await self.process_message(topic_name, message, receiver)
+
     async def receive_and_process(self, topic_name, subscription_name, max_renew):
         """Receive messages, process them, and forward."""
         if not self.source_client:
@@ -824,32 +930,71 @@ class ServiceBusHandler:
 
         while True:
             try:
-                receiver = await self._create_receiver(topic_name, subscription_name, max_renew)
-                await self._drain_receiver(receiver, topic_name, subscription_name)
+                async with await self.get_receiver(topic_name, subscription_name, max_renew) as receiver:
+                    await self._receive_loop(topic_name, subscription_name, receiver)
             except asyncio.CancelledError:
-                logger.debug(f'Cancelled receive loop for {topic_name}/{subscription_name}.')
-                return
+                break
             except OperationTimeoutError:
                 logger.debug(f'Timed out on {topic_name}/{subscription_name}.')
-                # loop continues and recreates receiver
             except Exception as e:
                 logger.error(f'Unknown exception {e} on {topic_name}/{subscription_name}.')
-                # continue loop; transient errors will retry
 
     async def run(self):
         """Start all receivers."""
         receive_tasks = []
 
         for topic, subscription, max_renew in self.input_topics:
-            for i in range(0, self.max_tasks):
+            for _ in range(0, self.max_tasks):
                 task = asyncio.create_task(self.receive_and_process(topic, subscription, max_renew))
                 receive_tasks.append(task)
 
         await asyncio.gather(*receive_tasks)
 
+    def _get_batcher(self, namespace: str, topic: str) -> 'ServiceBusHandler._Batcher':
+        key = (namespace, topic)
+        if key not in self.batchers:
+            async def factory():
+                return await self.get_sender(namespace, topic)
+            self.batchers[key] = ServiceBusHandler._Batcher(
+                sender_factory=factory,
+                max_wait_ms=self._BATCH_MAX_WAIT_MS,
+                max_msgs=self._BATCH_MAX_MESSAGES,
+                topic_name=topic,
+            )
+        return self.batchers[key]
+
+    def _build_message(self, body: str, application_properties: dict, topic_name: str) -> ServiceBusMessage:
+        """
+        Construct a ServiceBusMessage and apply the optional synchronous transformer.
+
+        Parameters
+        ----------
+        body : str
+            The body of the new message.
+        application_properties | dict
+            The headers for the message.
+        topic_name : str
+            The topic to which the message is to be sent.
+
+        Returns
+        -------
+        ServiceBusMessage
+            The message to be sent.
+        """
+        msg = ServiceBusMessage(body=body, application_properties=application_properties)
+        transformer = self._get_transformer()
+        if transformer:
+            try:
+                out = transformer(msg, topic_name, logger)
+                if isinstance(out, ServiceBusMessage):
+                    return out
+            except Exception as e:
+                logger.error(f'Custom transformer raised an exception: {e}')
+        return msg
+
     async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict):
         """
-        Send a message to the correct namespace and topic.
+        Send a message to the correct namespace and topic (batched by default).
 
         Parameters
         ----------
@@ -862,31 +1007,13 @@ class ServiceBusHandler:
         application_properties : dict
             The application properties of the original message.
         """
-        tasks = []
-        failures = []
-
-        for idx, namespace_name in enumerate(namespaces):
-            topic_name = topics[idx]
-            key = (namespace_name, topic_name)
-
-            async def send_to_destination(ns=namespace_name, tp=topic_name, k=key):
-                sender = await self.get_sender(ns, tp)
-                async with self.sender_send_locks[k]:
-                    try:
-                        if custom_sender:
-                            await custom_sender(sender, tp, message_body, application_properties)
-                        else:
-                            await sender.send_messages(message_body, application_properties=application_properties)
-                    except Exception as e:
-                        logger.error(f'Failed to send message with sender {k}: {e}')
-                        failures.append((k, e))
-
-            tasks.append(asyncio.create_task(send_to_destination()))
-
-        await asyncio.gather(*tasks)
-
-        if failures:
-            raise RuntimeError(f'{len(failures)} destination(s) failed: {failures}')
+        # enqueue on each relevant destination batcher and await per-item flush
+        await asyncio.gather(*[
+            self._get_batcher(ns, topics[idx]).add_and_wait(
+                self._build_message(message_body, application_properties, topics[idx])
+            )
+            for idx, ns in enumerate(namespaces)
+        ])
 
     async def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""
@@ -897,9 +1024,7 @@ class ServiceBusHandler:
             logger.debug(f'Creating connection for destination namespace: {namespace}.')
             self.clients[namespace] = ServiceBusClient.from_connection_string(conn_str)
 
-        self.keep_alive_tasks.append(asyncio.create_task(
-            self.keep_source_connection_alive()
-        ))
+        self.keep_alive_tasks.append(asyncio.create_task(self.keep_source_connection_alive()))
 
 
 async def main():
@@ -915,17 +1040,14 @@ async def main():
             logger.warning('Shutdown signal received. Cleaning up...')
             stop_event.set()
 
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(signal.SIGTERM, shutdown)
+        loop.add_signal_handler(signal.SIGTERM, shutdown)
+        loop.add_signal_handler(signal.SIGINT, shutdown)  # Handle CTRL+C
 
-        run_task = asyncio.create_task(handler.run())
+        await handler.run()      # Start processing messages
         await stop_event.wait()  # Wait for shutdown signal
-        run_task.cancel()
 
-        with contextlib.suppress(asyncio.CancelledError):
-            await run_task
     finally:
-        await handler.close()  # Ensure all connections are properly closed
+        await handler.close()    # Ensure all connections are properly closed
 
 
 if __name__ == '__main__':

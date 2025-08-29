@@ -3,6 +3,31 @@
 
 ## Unreleased
 
+### Features
+
+* Allow the configuration of a custom message transformer. BREAKING CHANGE: drop support for the custom sender hook. [Ben Dalling]
+
+* Allow a hook to "close" resources in any custom sender. [Ben Dalling]
+
+### Build
+
+* Release/0.10.0. [Ben Dalling]
+
+### Documentation
+
+* Fix some typos in the README.md. [Ben Dalling]
+
+* Add batch settings to the documentation. [Ben Dalling]
+
+* Give examples of buffered sending in custom senders. [Ben Dalling]
+
+### Performance
+
+* Implement message buffering. [Ben Dalling]
+
+
+## 0.9.1 (2025-08-20)
+
 ### Fix
 
 * Cleaner shutdown. [Ben Dalling]

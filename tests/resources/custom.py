@@ -1,29 +1,17 @@
-"""An example of a custom sender for the Service Bus Router."""
+from logging import Logger
+
 from azure.servicebus import ServiceBusMessage
-from azure.servicebus.aio import ServiceBusSender
 
 
-async def custom_sender(sender: ServiceBusSender, topic_name: str, message_body: object, application_properties: dict):
-    """
-    Send messages to the ie.topic with a session ID.
+def transform(msg: ServiceBusMessage, topic_name: str, logger: Logger) -> ServiceBusMessage:
+    """Set a session ID if an Irish topic."""
+    # seed = str(application_properties.get(_SEED_KEY))
+    # session_id = _session_from_seed(seed)
+    session_id = None
 
-    For all other topics, no session ID is required.
+    if topic_name == 'ie.topic':
+        session_id = '0'
 
-    Parameters
-    ----------
-    sender : ServiceBusSender
-        The sender to use to send the message.
-    message_body : str | bytes
-        The message body that is to be sent to the topic.
-    application_properties : dict | None
-        An optional set of properties that may have been set on the source message.
-    """
-    if sender.entity_name == 'ie.topic':
-        session_message = ServiceBusMessage(
-            body=message_body,
-            application_properties=application_properties,
-            session_id='0'
-        )
-        await sender.send_messages(message=session_message)
-    else:
-        await sender.send_messages(ServiceBusMessage(body=message_body, application_properties=application_properties))
+    logger.debug(f'transform {topic_name} {session_id}')
+    msg.session_id = session_id
+    return msg

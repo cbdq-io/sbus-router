@@ -26,7 +26,7 @@ services:
       ISO_3166_1_ALPHA_2: FR
       LOG_FORMAT: "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
       LOG_LEVEL: DEBUG
-      ROUTER_CUSTOM_SENDER: "custom:custom_sender"
+      ROUTER_CUSTOM_TRANSFORMER: "custom:transform"
       ROUTER_MAX_TASKS: 2
       ROUTER_NAMESPACE_GB_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ROUTER_NAMESPACE_IE_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
