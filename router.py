@@ -59,7 +59,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '0.9.1'
+__version__ = '0.10.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 

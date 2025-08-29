@@ -1,7 +1,7 @@
 # Changelog
 
 
-## Unreleased
+## 0.10.0 (2025-08-29)
 
 ### Features
 
@@ -9,7 +9,13 @@
 
 * Allow a hook to "close" resources in any custom sender. [Ben Dalling]
 
+### Build
+
+* Release/0.10.0. [Ben Dalling]
+
 ### Documentation
+
+* Fix some typos in the README.md. [Ben Dalling]
 
 * Add batch settings to the documentation. [Ben Dalling]
 
