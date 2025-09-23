@@ -28,5 +28,6 @@ RUN pip install --no-cache-dir -r requirements.txt --user
 COPY --chown=appuser:appuser --chmod=0644 rule-schema.json /home/appuser/rule-schema.json
 COPY --chown=appuser:appuser --chmod=0755 router.py /home/appuser/router.py
 COPY --chown=appuser:appuser --chmod=0755 nukedlq.py /home/appuser/nukedlq.py
+COPY --chown=appuser:appuser --chmod=0755 replay-dlq.py /home/appuser/replay-dlq.py
 
 ENTRYPOINT [ "/home/appuser/router.py" ]
