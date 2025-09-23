@@ -1,6 +1,17 @@
 # Changelog
 
 
+## Unreleased
+
+### Features
+
+* Add the replay-dlq.py script. [Ben Dalling]
+
+### Fix
+
+* Correct README.md. [Ben Dalling]
+
+
 ## 0.10.0 (2025-08-29)
 
 ### Features
