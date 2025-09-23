@@ -11,6 +11,10 @@
 
 * Correct README.md. [Ben Dalling]
 
+### Build
+
+* Release/0.11.0. [Ben Dalling]
+
 
 ## 0.10.0 (2025-08-29)
 
