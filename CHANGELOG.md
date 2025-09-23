@@ -5,6 +5,21 @@
 
 ### Features
 
+* Add the replay-dlq.py script. [Ben Dalling]
+
+### Fix
+
+* Correct README.md. [Ben Dalling]
+
+### Build
+
+* Release/0.11.0. [Ben Dalling]
+
+
+## 0.10.0 (2025-08-29)
+
+### Features
+
 * Allow the configuration of a custom message transformer. BREAKING CHANGE: drop support for the custom sender hook. [Ben Dalling]
 
 * Allow a hook to "close" resources in any custom sender. [Ben Dalling]
