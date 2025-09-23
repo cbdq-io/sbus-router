@@ -13,7 +13,7 @@ least one rule configured  (see below).
 | LOG_LEVEL | | WARN | The log level for the router.|
 | ROUTER_BATCH_MAX_MESSAGES | No | 256 | The max messages collected before sending as a batch. |
 | ROUTER_BATCH_MAX_WAIT_MS | No | 10 | The max time in milliseconds to wait before sending a batch. |
-| ROUTER_CUSTOM_SENDER | No | N/A | See below. |
+| ROUTER_CUSTOM_TRANSFORMER | No | N/A | See below. |
 | ROUTER_MAX_TASKS | No | 1 | The number of tasks to allocate to each topic/subscription. |
 | ROUTER_PREFETCH_COUNT | No | 100 | The maximum number of messages to cache with each request to the service. |
 | ROUTER_PROMETHEUS_PORT | No | 8000 | The port for Prometheus to start on. |

@@ -10,6 +10,7 @@ Feature: Test the Container
         Examples:
             | path                           |
             | /home/appuser/nukedlq.py       |
+            | /home/appuser/replay-dlq.py    |
             | /home/appuser/rule-schema.json |
             | /home/appuser/router.py        |
 
