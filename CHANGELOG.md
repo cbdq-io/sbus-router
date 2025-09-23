@@ -1,7 +1,7 @@
 # Changelog
 
 
-## Unreleased
+## 0.11.0 (2025-09-23)
 
 ### Features
 
@@ -10,6 +10,10 @@
 ### Fix
 
 * Correct README.md. [Ben Dalling]
+
+### Build
+
+* Release/0.11.0. [Ben Dalling]
 
 
 ## 0.10.0 (2025-08-29)
