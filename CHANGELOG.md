@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Features
+
+* Allow the setting of ROUTER_TIMESTAMP_APP_PROPERTY_NAME. [Ben Dalling]
+
+
 ## 0.11.0 (2025-09-23)
 
 ### Features
