@@ -18,6 +18,7 @@ least one rule configured  (see below).
 | ROUTER_PREFETCH_COUNT | No | 100 | The maximum number of messages to cache with each request to the service. |
 | ROUTER_PROMETHEUS_PORT | No | 8000 | The port for Prometheus to start on. |
 | ROUTER_SOURCE_CONNECTION_STRING | Yes | | The connection string for the source Service Bus namespace. |
+| ROUTER_TIMESTAMP_APP_PROPERTY_NAME | No | N/A | If specified, will add a named application property containing an ISO 8601 string of when the message was routed. |
 
 ## Rules
 
