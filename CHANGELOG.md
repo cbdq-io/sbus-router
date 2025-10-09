@@ -5,6 +5,8 @@
 
 ### Features
 
+* Capture the timestamp of when the message was enqueued on the source namespace in application properties. [Ben Dalling]
+
 * Allow the setting of ROUTER_TIMESTAMP_APP_PROPERTY_NAME. [Ben Dalling]
 
 
