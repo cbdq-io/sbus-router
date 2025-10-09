@@ -9,6 +9,10 @@
 
 * Allow the setting of ROUTER_TIMESTAMP_APP_PROPERTY_NAME. [Ben Dalling]
 
+### Build
+
+* Release/0.12.0. [Ben Dalling]
+
 
 ## 0.11.0 (2025-09-23)
 
