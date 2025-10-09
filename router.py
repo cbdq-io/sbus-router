@@ -900,7 +900,8 @@ class ServiceBusHandler:
                         destination_namespaces,
                         destination_topics,
                         message_body,
-                        message.application_properties
+                        message.application_properties,
+                        message.enqueued_time_utc
                     )
                     await receiver.complete_message(message)
                     return
@@ -990,11 +991,7 @@ class ServiceBusHandler:
         if self.ts_app_prop_name:
             ts = datetime.datetime.now(datetime.UTC).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
             logger.debug(f'Setting application property "{self.ts_app_prop_name}" to "{ts}".')
-
-            if application_properties:
-                application_properties[self.ts_app_prop_name] = ts
-            else:
-                application_properties = {self.ts_app_prop_name: ts}
+            application_properties[self.ts_app_prop_name] = ts
 
         msg = ServiceBusMessage(body=body, application_properties=application_properties)
         transformer = self._get_transformer()
@@ -1009,7 +1006,8 @@ class ServiceBusHandler:
 
         return msg
 
-    async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict):
+    async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict,
+                           src_enqueued_time_utc: datetime.datetime):
         """
         Send a message to the correct namespace and topic (batched by default).
 
@@ -1023,8 +1021,17 @@ class ServiceBusHandler:
             The body of the message to be sent.
         application_properties : dict
             The application properties of the original message.
+        src_enqueued_time_utc : datetime
+            The timestamp of when the message was enqueued on the source namespace.
         """
         # enqueue on each relevant destination batcher and await per-item flush
+        timestamp = src_enqueued_time_utc.isoformat(timespec='milliseconds') + 'Z'
+
+        if application_properties:
+            application_properties['__src_enqueued_time_utc'] = timestamp
+        else:
+            application_properties = {'__src_enqueued_time_utc': timestamp}
+
         await asyncio.gather(*[
             self._get_batcher(ns, topics[idx]).add_and_wait(
                 self._build_message(message_body, application_properties, topics[idx])
