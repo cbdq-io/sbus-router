@@ -1,13 +1,17 @@
 # Changelog
 
 
-## Unreleased
+## 0.12.0 (2025-10-09)
 
 ### Features
 
 * Capture the timestamp of when the message was enqueued on the source namespace in application properties. [Ben Dalling]
 
 * Allow the setting of ROUTER_TIMESTAMP_APP_PROPERTY_NAME. [Ben Dalling]
+
+### Build
+
+* Release/0.12.0. [Ben Dalling]
 
 
 ## 0.11.0 (2025-09-23)
