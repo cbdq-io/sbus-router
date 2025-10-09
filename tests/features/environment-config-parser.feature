@@ -22,7 +22,8 @@ Feature: Environment Configuration Parser
         Then the EnvironmentConfigParser method <method_name> returns <value>
 
         Examples:
-            | key                             | value                                                                                                                                                                  | method_name           |
-            | ROUTER_PROMETHEUS_PORT          | 8042                                                                                                                                                                   | get_prometheus_port   |
-            | ROUTER_SOURCE_CONNECTION_STRING | Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;                                                                   | get_source_url        |
-            | ROUTER_RULE_COUNTRY_GB          | { "destination_namespaces": "GB", "destination_topics": "gb.topic", "jmespath": "country", "regexp": "^GB$", "source_subscription": "test", "source_topic": "topic.1"} | get_rules             |
+            | key                                | value                                                                                                                                                                  | method_name           |
+            | ROUTER_PROMETHEUS_PORT             | 8042                                                                                                                                                                   | get_prometheus_port   |
+            | ROUTER_SOURCE_CONNECTION_STRING    | Endpoint=sb://localhost;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;                                                                   | get_source_url        |
+            | ROUTER_RULE_COUNTRY_GB             | { "destination_namespaces": "GB", "destination_topics": "gb.topic", "jmespath": "country", "regexp": "^GB$", "source_subscription": "test", "source_topic": "topic.1"} | get_rules             |
+            | ROUTER_TIMESTAMP_APP_PROPERTY_NAME | __routed_at                                                                                                                                                            | get_ts_app_prop_name  |

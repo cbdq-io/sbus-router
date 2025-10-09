@@ -120,6 +120,13 @@ def is_message_valid(message: ServiceBusMessage, expected_body: str, topic_name:
     return response
 
 
+def is_application_propery_present(message: ServiceBusMessage, key: str) -> bool:
+    """Confirm that an application property is set."""
+    application_properties = message.application_properties
+    message = f'The {key} application property is missing "{application_properties}".'
+    assert key.encode() in application_properties, message
+
+
 @then('the expected output message is received')
 def _(connection_string: str, input_topic: str, output_topic: str, message_body: str):
     """The expected output message is received."""
@@ -151,3 +158,5 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
         client.close()
         assert message_received, f'Message not received within the retry limit from "{output_topic}".'
         assert is_message_valid(message, message_body, output_topic)
+        is_application_propery_present(message, '__routed_at')
+        is_application_propery_present(message, '__src_enqueued_time_utc')

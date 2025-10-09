@@ -35,6 +35,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 """
 import asyncio
 import contextlib
+import datetime
 import importlib
 import inspect
 import json
@@ -59,7 +60,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '0.11.0'
+__version__ = '0.12.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -504,6 +505,10 @@ class EnvironmentConfigParser:
         """Get the connection string of the source namespace."""
         return self._environ['ROUTER_SOURCE_CONNECTION_STRING']
 
+    def get_ts_app_prop_name(self) -> str:
+        """Return the name of the specified timestamp application property."""
+        return self._environ.get('ROUTER_TIMESTAMP_APP_PROPERTY_NAME')
+
     def init_rules_usage(self) -> dict:
         """
         Initialise a dictionary representing the usage of all defined rules.
@@ -700,6 +705,7 @@ class ServiceBusHandler:
         self.input_topics = config.topics_and_subscriptions()
         self.rules = config.get_rules()
         self.max_tasks = config.max_tasks()
+        self.ts_app_prop_name = config.get_ts_app_prop_name()
         logger.info(f'Starting {self.max_tasks} task(s) per subscription.')
 
         for idx, rule in enumerate(self.rules):
@@ -894,7 +900,8 @@ class ServiceBusHandler:
                         destination_namespaces,
                         destination_topics,
                         message_body,
-                        message.application_properties
+                        message.application_properties,
+                        message.enqueued_time_utc
                     )
                     await receiver.complete_message(message)
                     return
@@ -981,8 +988,14 @@ class ServiceBusHandler:
         ServiceBusMessage
             The message to be sent.
         """
+        if self.ts_app_prop_name:
+            ts = datetime.datetime.now(datetime.UTC).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+            logger.debug(f'Setting application property "{self.ts_app_prop_name}" to "{ts}".')
+            application_properties[self.ts_app_prop_name] = ts
+
         msg = ServiceBusMessage(body=body, application_properties=application_properties)
         transformer = self._get_transformer()
+
         if transformer:
             try:
                 out = transformer(msg, topic_name, logger)
@@ -990,9 +1003,11 @@ class ServiceBusHandler:
                     return out
             except Exception as e:
                 logger.error(f'Custom transformer raised an exception: {e}')
+
         return msg
 
-    async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict):
+    async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict,
+                           src_enqueued_time_utc: datetime.datetime):
         """
         Send a message to the correct namespace and topic (batched by default).
 
@@ -1006,8 +1021,17 @@ class ServiceBusHandler:
             The body of the message to be sent.
         application_properties : dict
             The application properties of the original message.
+        src_enqueued_time_utc : datetime
+            The timestamp of when the message was enqueued on the source namespace.
         """
         # enqueue on each relevant destination batcher and await per-item flush
+        timestamp = src_enqueued_time_utc.isoformat(timespec='milliseconds') + 'Z'
+
+        if application_properties:
+            application_properties['__src_enqueued_time_utc'] = timestamp
+        else:
+            application_properties = {'__src_enqueued_time_utc': timestamp}
+
         await asyncio.gather(*[
             self._get_batcher(ns, topics[idx]).add_and_wait(
                 self._build_message(message_body, application_properties, topics[idx])
