@@ -4,7 +4,7 @@ USER root
 
 LABEL org.opencontainers.image.description "A configurable router for Azure Service Bus."
 
-# hadolint ignore=DL3008
+# hadolint ignore=DL3008,DL3013
 RUN apt-get update \
   && apt-get install --no-install-recommends --yes bind9-dnsutils ncat \
   && apt-get upgrade --yes libdjvulibre-dev libdjvulibre-text libdjvulibre21 \
@@ -15,7 +15,8 @@ RUN apt-get update \
     --uid 1000 \
     --gid 1000 \
     --comment 'Application User' \
-    --shell /usr/sbin/nologin appuser
+    --shell /usr/sbin/nologin appuser \
+  && pip install --no-cache-dir --upgrade pip
 
 USER appuser
 WORKDIR /home/appuser
