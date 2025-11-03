@@ -1,6 +1,17 @@
 # Changelog
 
 
+## Unreleased
+
+### Features
+
+* Allow max tasks to be set on an individual topic. [Ben Dalling]
+
+### Fix
+
+* CVE-2025-8869. [Ben Dalling]
+
+
 ## 0.12.0 (2025-10-09)
 
 ### Features
