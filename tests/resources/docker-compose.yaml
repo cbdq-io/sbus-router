@@ -27,15 +27,15 @@ services:
       LOG_FORMAT: "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
       LOG_LEVEL: DEBUG
       ROUTER_CUSTOM_TRANSFORMER: "custom:transform"
-      ROUTER_MAX_TASKS: 2
+      ROUTER_MAX_TASKS: 1
       ROUTER_NAMESPACE_GB_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ROUTER_NAMESPACE_IE_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ROUTER_RULE_COUNTRY_FR: '{ "destination_namespaces": "", "destination_topics": "", "jmespath": "country", "regexp": "^$$ISO_3166_1_ALPHA_2$", "source_subscription": "test", "source_topic": "topic.1"}'
       ROUTER_RULE_COUNTRY_GB: '{ "destination_namespaces": "GB", "destination_topics": "gb.topic", "jmespath": "country", "regexp": "^GB$", "source_subscription": "test", "source_topic": "topic.1"}'
-      ROUTER_RULE_COUNTRY_IE: '{ "destination_namespaces": "IE", "destination_topics": "ie.topic", "is_session_required": true, "jmespath": "country", "regexp": "^IE$", "source_subscription": "test", "source_topic": "topic.2"}'
-      ROUTER_RULE_COUNTRY_ALL: '{ "destination_namespaces": "GB,IE", "destination_topics": "gb.topic,ie.topic", "is_session_required": true, "jmespath": "destination", "regexp": "^ALL$", "source_subscription": "test", "source_topic": "topic.2"}'
+      ROUTER_RULE_COUNTRY_IE: '{ "destination_namespaces": "IE", "destination_topics": "ie.topic", "is_session_required": true, "jmespath": "country", "regexp": "^IE$", "source_subscription": "test", "source_topic": "topic.2", "max_tasks": 2}'
+      ROUTER_RULE_COUNTRY_ALL: '{ "destination_namespaces": "GB,IE", "destination_topics": "gb.topic,ie.topic", "is_session_required": true, "jmespath": "destination", "regexp": "^ALL$", "source_subscription": "test", "source_topic": "topic.2", "max_tasks": 2}'
       ROUTER_RULE_GB_TELNO: '{"destination_namespaces":"GB","destination_topics":"gb.topic","jmespath":"details[?telephone_number].telephone_number","regexp":"^.*44","source_subscription":"test","source_topic":"topic.1"}'
-      ROUTER_RULE_IE_TELNO: '{"destination_namespaces":"IE","destination_topics":"ie.topic","is_session_required":true,"jmespath":"details[?telephone_number].telephone_number","regexp":"^.*353","source_subscription":"test","source_topic":"topic.2"}'
+      ROUTER_RULE_IE_TELNO: '{"destination_namespaces":"IE","destination_topics":"ie.topic","is_session_required":true,"jmespath":"details[?telephone_number].telephone_number","regexp":"^.*353","source_subscription":"test","source_topic":"topic.2", "max_tasks": 2}'
       ROUTER_SOURCE_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
       ROUTER_TIMESTAMP_APP_PROPERTY_NAME: "__routed_at"
     image: router:latest

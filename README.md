@@ -39,11 +39,14 @@ The configurable fields for rules are:
   considered valid, not be produced onto the DLQ, but will be dropped.
   Topics can be comma separated which means that the messages that match
   the rule will be sent to each of the topics.
-- `max_auto_renew_duration`: The time in seconds to allow messags for this
-  topic to be locked for (default: 300).
 - `is_session_required`: Does the source subscription require sessions?
 - `jmespath`: A [JMESPath](https://jmespath.org/) expression to query an
   element within the JSON contained in the message.
+- `max_auto_renew_duration`: The time in seconds to allow messags for this
+  topic to be locked for (default: 300).
+- `max_tasks`: Allow the user to override any value for a single topic set
+  by the `MAX_TASKS` environment variable.  If set for any rule, should be
+  set consistently for all rules on that topic.
 - `regexp`: A
   [regular expression](https://en.wikipedia.org/wiki/Regular_expression)
   that will me used to match against the data returned from `jmespath`.
