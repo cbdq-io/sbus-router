@@ -11,6 +11,10 @@
 
 * CVE-2025-8869. [Ben Dalling]
 
+### Build
+
+* Release/0.13.0. [Ben Dalling]
+
 
 ## 0.12.0 (2025-10-09)
 
