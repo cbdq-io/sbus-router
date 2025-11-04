@@ -4,7 +4,7 @@ USER root
 
 LABEL org.opencontainers.image.description "A configurable router for Azure Service Bus."
 
-# hadolint ignore=DL3008
+# hadolint ignore=DL3008,DL3013
 RUN apt-get update \
   && apt-get install --no-install-recommends --yes bind9-dnsutils ncat \
   && apt-get upgrade --yes libdjvulibre-dev libdjvulibre-text libdjvulibre21 \
@@ -15,7 +15,8 @@ RUN apt-get update \
     --uid 1000 \
     --gid 1000 \
     --comment 'Application User' \
-    --shell /usr/sbin/nologin appuser
+    --shell /usr/sbin/nologin appuser \
+  && pip install --no-cache-dir --upgrade pip
 
 USER appuser
 WORKDIR /home/appuser
@@ -24,7 +25,10 @@ ENV PYTHONPATH=/home/appuser
 HEALTHCHECK --interval=30s --timeout=30s --start-period=10s --retries=3 CMD [ "/bin/sh", "-c", "curl --fail localhost:${ROUTER_PROMETHEUS_PORT}" ]
 
 COPY --chown=appuser:appuser requirements.txt /home/appuser/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt --user
+
+# hadolint ignore=DL3013
+RUN python3 -m pip install --no-cache-dir --upgrade pip \
+  && pip install --no-cache-dir -r requirements.txt --user
 COPY --chown=appuser:appuser --chmod=0644 rule-schema.json /home/appuser/rule-schema.json
 COPY --chown=appuser:appuser --chmod=0755 router.py /home/appuser/router.py
 COPY --chown=appuser:appuser --chmod=0755 nukedlq.py /home/appuser/nukedlq.py

@@ -60,7 +60,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '0.12.0'
+__version__ = '0.13.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -180,9 +180,11 @@ class RouterRule:
         A regular expression for comparing against the message.
     source_topic : str
         The name of the source topic that makes up some of the matching criteria for the rule.
+    max_tasks : int
+        The number of tasks to allocated when consuming from the rule.
     """
 
-    def __init__(self, name: str, definition: str) -> None:
+    def __init__(self, name: str, definition: str, max_tasks: int) -> None:
         self.definition = definition
         self.name(name)
         parsed_definition = self.parse_definition(definition)
@@ -206,6 +208,7 @@ class RouterRule:
             self.jmespath_expr = None
 
         self.max_auto_renew_duration = parsed_definition.get('max_auto_renew_duration', 300)
+        self.max_tasks = parsed_definition.get('max_tasks', max_tasks)
         self.regexp = parsed_definition.get('regexp', None)
 
         if self.regexp:
@@ -494,11 +497,13 @@ class EnvironmentConfigParser:
             A list of RouterRule objects.
         """
         response = []
+
         for item in self.get_prefixed_values('ROUTER_RULE_'):
             name = item[0].replace('ROUTER_RULE_', '')
             template = Template(item[1])
             definition = template.safe_substitute(os.environ)
-            response.append(RouterRule(name, definition))
+            response.append(RouterRule(name, definition, self.max_tasks()))
+
         return response
 
     def get_source_connection_string(self) -> str:
@@ -576,7 +581,8 @@ class EnvironmentConfigParser:
         rules = self.get_rules()
 
         for rule in rules:
-            instance = (rule.source_topic, rule.source_subscription, rule.max_auto_renew_duration)
+            instance = (rule.source_topic, rule.source_subscription, rule.max_auto_renew_duration, rule.max_tasks)
+
             if instance not in response:
                 response.append(instance)
 
@@ -706,7 +712,7 @@ class ServiceBusHandler:
         self.rules = config.get_rules()
         self.max_tasks = config.max_tasks()
         self.ts_app_prop_name = config.get_ts_app_prop_name()
-        logger.info(f'Starting {self.max_tasks} task(s) per subscription.')
+        logger.info(f'Starting by default {self.max_tasks} task(s) per subscription.')
 
         for idx, rule in enumerate(self.rules):
             logger.info(f'Rule parsing order {idx} {rule.name()}')
@@ -950,8 +956,10 @@ class ServiceBusHandler:
         """Start all receivers."""
         receive_tasks = []
 
-        for topic, subscription, max_renew in self.input_topics:
-            for _ in range(0, self.max_tasks):
+        for topic, subscription, max_renew, max_tasks in self.input_topics:
+            logger.debug(f'Creating {max_tasks} tasks for {topic}/{subscription}')
+
+            for _ in range(0, max_tasks):
                 task = asyncio.create_task(self.receive_and_process(topic, subscription, max_renew))
                 receive_tasks.append(task)
 
