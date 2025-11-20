@@ -3,6 +3,21 @@
 
 ## Unreleased
 
+### Fix
+
+* Re-enable the DLQ message checks. [Ben Dalling]
+
+### Documentation
+
+* Add a contributing guide. [Ben Dalling]
+
+### Tests
+
+* Ensure expected DLQ logs are generated. [Ben Dalling]
+
+
+## 0.13.0 (2025-11-04)
+
 ### Features
 
 * Allow max tasks to be set on an individual topic. [Ben Dalling]

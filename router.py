@@ -60,7 +60,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '0.13.0'
+__version__ = '0.13.1'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -835,7 +835,7 @@ class ServiceBusHandler:
     async def keep_source_connection_alive(self, interval=240):
         """Ping DLQ via peek to check for presence of dead-letter messages."""
         while not self.shutdown_event.is_set():
-            for topic_name, subscription_name, _ in self.input_topics:
+            for topic_name, subscription_name, _, _ in self.input_topics:
                 logger.debug(f'Checking DLQ for {topic_name}/{subscription_name}')
 
                 try:
