@@ -30,24 +30,24 @@ environment.
 
    ```shell
    # If using HTTPS:
-   git clone https://github.com/YOUR_USERNAME/kc-connectors.git
+   git clone https://github.com/YOUR_USERNAME/sbus-router.git
 
    # If using SSH:
-   git clone git@github.com:YOUR_USERNAME/kc-connectors.git
+   git clone git@github.com:YOUR_USERNAME/sbus-router.git
 
    ```
 
 1. Setup the Upstream Repository
 
    ```shell
-   cd kc-connectors
+   cd sbus-router
 
    # If using HTTP
-   git remote add upstream https://github.com/cbdq-io/kc-connectors.git
+   git remote add upstream https://github.com/cbdq-io/sbus-router.git
 
 
    # If using SSH
-   git remote add upstream git@github.com:cbdq-io/kc-connectors.git
+   git remote add upstream git@github.com:cbdq-io/sbus-router.git
 
    ```
 
@@ -85,7 +85,6 @@ branching model. Here's the summary:
 1. Feature Branch:
 
    ```shell
-
    git checkout develop
    git pull upstream develop
 
@@ -95,9 +94,7 @@ branching model. Here's the summary:
 1. Bugfix Branch:
 
    ```shell
-
    git checkout develop
-
    git pull upstream develop
    git checkout -b bugfix/your-bugfix-name
    ```
