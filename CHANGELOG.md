@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Fix
+
+* Remove ineffective lock renewal and make abandon and complete more robust. [Ben Dalling]
+
+
 ## 0.13.1 (2025-11-20)
 
 ### Fix
