@@ -5,6 +5,8 @@
 
 ### Fix
 
+* Simplify the replay-dlq.py script. [Ben Dalling]
+
 * Remove ineffective lock renewal and make abandon and complete more robust. [Ben Dalling]
 
 
