@@ -1043,15 +1043,17 @@ class ServiceBusHandler:
 
     async def safe_complete(self, receiver: ServiceBusReceiver, message: ServiceBusMessage) -> bool:
         """Catch and retry when attempting to complete messages."""
-        for attempt in range(3):
+        attempts = 3
+
+        for attempt in range(attempts):
             try:
                 await receiver.complete_message(message)
                 return True
             except Exception as e:
-                logger.warning(f'Complete failed (attempt {attempt}): {e}')
+                logger.info(f'Complete failed (attempt {attempt + 1}): {e}')
                 await asyncio.sleep(0.25)
 
-        logger.error(f'COMPLETE FAILED after retries — message lock likely lost.')
+        logger.error(f'COMPLETE FAILED after {attempts} retries.')
         return False
 
     async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict,
