@@ -5,7 +5,13 @@
 
 ### Fix
 
+* Bump Python version from 3.12 to 3.14. [Ben Dalling]
+
+* Ensure replay-dlq.py can handle sessioned subscriptions. [Ben Dalling]
+
 * Renew session lock on sessioned receivers. [Ben Dalling]
+
+* Simplify the replay-dlq.py script. [Ben Dalling]
 
 * Remove ineffective lock renewal and make abandon and complete more robust. [Ben Dalling]
 
