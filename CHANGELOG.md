@@ -5,7 +5,13 @@
 
 ### Fix
 
+* Renew session lock on sessioned receivers. [Ben Dalling]
+
 * Remove ineffective lock renewal and make abandon and complete more robust. [Ben Dalling]
+
+### Tests
+
+* Reduce code coverage [again] [Ben Dalling]
 
 
 ## 0.13.1 (2025-11-20)
