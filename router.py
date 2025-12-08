@@ -765,9 +765,10 @@ class ServiceBusHandler:
                 subscription_name=subscription_name,
                 session_id=NEXT_AVAILABLE_SESSION,
                 max_wait_time=5,
-                prefetch_count=self.config.get_prefetch_count()
+                prefetch_count=0
             )
-            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
+            sid = getattr(receiver.session, 'session_id', 'unknown')
+            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({sid})')
         else:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
@@ -937,7 +938,16 @@ class ServiceBusHandler:
         while True:
             try:
                 async with await self.get_receiver(topic_name, subscription_name) as receiver:
-                    await self._receive_loop(topic_name, subscription_name, receiver)
+                    renew_task = None
+
+                    if receiver.session is not None:
+                        renew_task = asyncio.create_task(self._renew_session_lock(receiver))
+
+                    try:
+                        await self._receive_loop(topic_name, subscription_name, receiver)
+                    finally:
+                        if renew_task:
+                            renew_task.cancel()
             except asyncio.CancelledError:
                 break
             except OperationTimeoutError:
@@ -958,6 +968,17 @@ class ServiceBusHandler:
                 receive_tasks.append(task)
 
         await asyncio.gather(*receive_tasks)
+
+    async def _renew_session_lock(self, receiver: ServiceBusReceiver):
+        """Renew session locks."""
+        while not self.shutdown_event.is_set():
+            try:
+                await receiver.session.renew_lock()
+            except Exception as e:
+                message = f'Session lock renewal failed on {receiver.session.session_id}'
+                logger.error(f'{message}: {e}')
+                return
+            await asyncio.sleep(10)
 
     def _get_batcher(self, namespace: str, topic: str) -> 'ServiceBusHandler._Batcher':
         key = (namespace, topic)
@@ -1022,14 +1043,17 @@ class ServiceBusHandler:
 
     async def safe_complete(self, receiver: ServiceBusReceiver, message: ServiceBusMessage) -> bool:
         """Catch and retry when attempting to complete messages."""
-        for attempt in range(3):
+        attempts = 3
+
+        for attempt in range(attempts):
             try:
                 await receiver.complete_message(message)
                 return True
             except Exception as e:
-                logger.error(f'Complete failed (attempt {attempt}): {e}')
+                logger.info(f'Complete failed (attempt {attempt + 1}): {e}')
                 await asyncio.sleep(0.25)
 
+        logger.error(f'COMPLETE FAILED after {attempts} retries.')
         return False
 
     async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict,
