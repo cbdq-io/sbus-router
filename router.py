@@ -880,9 +880,13 @@ class ServiceBusHandler:
         receiver : ServiceBusReceiver
             The receiver that the message came in on.
         """
+        renew_task = None
         message_body = await extract_message_body(message)
         rules_for_topic = self.rules_by_topic.get(source_topic, [])
         message_data = self._maybe_parse_json_for_topic(rules_for_topic, message_body)
+
+        if receiver.session is None:
+            renew_task = asyncio.create_task(self._renew_message_lock(receiver, message))
 
         for rule in rules_for_topic:
             is_match, destination_namespaces, destination_topics = rule.is_match(
@@ -909,6 +913,9 @@ class ServiceBusHandler:
                     logger.error(f'Failed to send message ({",".join(destination_namespaces)}): {e}')
                     await self.safe_abandon(receiver, message)
                     return
+                finally:
+                    if renew_task:
+                        renew_task.cancel()
 
         # No matching rule: Send to DLQ
         logger.warning(f'No rules match message from {source_topic}, sending to the DLQ.')
@@ -923,6 +930,9 @@ class ServiceBusHandler:
         except Exception as e:
             logger.error(f'Failed to send message to DLQ: {e}')
             await self.safe_abandon(receiver, message)
+        finally:
+            if renew_task:
+                renew_task.cancel()
 
     async def _receive_loop(self, topic_name, subscription_name, receiver):
         """Reduce complexity in receive_and_process."""
@@ -968,6 +978,16 @@ class ServiceBusHandler:
                 receive_tasks.append(task)
 
         await asyncio.gather(*receive_tasks)
+
+    async def _renew_message_lock(self, receiver: ServiceBusReceiver, message: ServiceBusReceivedMessage):
+        """Renew message locks for non-sessioned receivers."""
+        while not self.shutdown_event.is_set():
+            try:
+                await receiver.renew_message_lock(message)
+            except Exception as e:
+                logger.error(f'Message lock renewal failed: {e}')
+                return
+            await asyncio.sleep(10)
 
     async def _renew_session_lock(self, receiver: ServiceBusReceiver):
         """Renew session locks."""
