@@ -5,6 +5,8 @@
 
 ### Fix
 
+* Enable the renewal of locks for non-session enabled messages. [Ben Dalling]
+
 * Bump Python version from 3.12 to 3.14. [Ben Dalling]
 
 * Ensure replay-dlq.py can handle sessioned subscriptions. [Ben Dalling]
