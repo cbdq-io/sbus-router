@@ -936,9 +936,20 @@ class ServiceBusHandler:
                 renew_task.cancel()
 
     async def _receive_loop(self, topic_name, subscription_name, receiver):
-        """Reduce complexity in receive_and_process."""
-        async for message in receiver:
-            await self.process_message(topic_name, message, receiver)
+        """Receive in small batches instead of relying on the async iterator."""
+        while not self.shutdown_event.is_set():
+            # Tune these two numbers if needed
+            messages = await receiver.receive_messages(
+                max_message_count=int(os.getenv('MAX_RECEIVER_MESSAGE_COUNT', '50')),
+                max_wait_time=int(os.getenv('MAX_RECEIVER_MESSAGE_WAIT_TIME', '1'))
+            )
+
+            if not messages:
+                # Nothing available right now; loop again
+                continue
+
+            for message in messages:
+                await self.process_message(topic_name, message, receiver)
 
     async def receive_and_process(self, topic_name, subscription_name):
         """Receive messages, process them, and forward."""
