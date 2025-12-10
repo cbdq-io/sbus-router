@@ -441,6 +441,10 @@ class EnvironmentConfigParser:
     def __init__(self, environ: dict = dict(os.environ)) -> None:
         self._environ = environ
 
+    def get_disable_lock_renewal(self) -> bool:
+        """Check if lock renewal is to be disabled."""
+        return self._environ.get('ROUTER_DISABLE_LOCK_RENEWAL', '0').lower() in ('1', 'true', 'yes')
+
     def get_prefetch_count(self) -> int:
         """
         Get the number of messages to be prefetched by the client.
@@ -712,6 +716,7 @@ class ServiceBusHandler:
         self.max_tasks = config.max_tasks()
         self.ts_app_prop_name = config.get_ts_app_prop_name()
         logger.info(f'Starting by default {self.max_tasks} task(s) per subscription.')
+        self.disable_lock_renewal = config.get_disable_lock_renewal()
 
         for idx, rule in enumerate(self.rules):
             logger.info(f'Rule parsing order {idx} {rule.name()}')
@@ -962,7 +967,7 @@ class ServiceBusHandler:
                 async with await self.get_receiver(topic_name, subscription_name) as receiver:
                     renew_task = None
 
-                    if receiver.session is not None:
+                    if receiver.session is not None and not self.disable_lock_renewal:
                         renew_task = asyncio.create_task(self._renew_session_lock(receiver))
 
                     try:
