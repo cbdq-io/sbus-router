@@ -891,7 +891,7 @@ class ServiceBusHandler:
         rules_for_topic = self.rules_by_topic.get(source_topic, [])
         message_data = self._maybe_parse_json_for_topic(rules_for_topic, message_body)
 
-        if receiver.session is None:
+        if receiver.session is None and not self.disable_lock_renewal:
             renew_task = asyncio.create_task(self._renew_message_lock(receiver, message))
 
         for rule in rules_for_topic:
