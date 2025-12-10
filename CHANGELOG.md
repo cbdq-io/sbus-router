@@ -5,6 +5,8 @@
 
 ### Fix
 
+* Set max_wait_time for non-sessioned receivers. [Ben Dalling]
+
 * Enable the renewal of locks for non-session enabled messages. [Ben Dalling]
 
 * Bump Python version from 3.12 to 3.14. [Ben Dalling]
