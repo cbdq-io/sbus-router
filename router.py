@@ -774,7 +774,8 @@ class ServiceBusHandler:
             receiver = self.source_client.get_subscription_receiver(
                 topic_name=topic_name,
                 subscription_name=subscription_name,
-                prefetch_count=self.config.get_prefetch_count()
+                prefetch_count=self.config.get_prefetch_count(),
+                max_wait_time=1
             )
 
         return receiver
