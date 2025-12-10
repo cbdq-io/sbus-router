@@ -5,6 +5,8 @@
 
 ### Fix
 
+* Optionally disable lock renewal. [Ben Dalling]
+
 * Set max_wait_time for non-sessioned receivers. [Ben Dalling]
 
 * Enable the renewal of locks for non-session enabled messages. [Ben Dalling]
