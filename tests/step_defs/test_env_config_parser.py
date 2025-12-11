@@ -37,6 +37,7 @@ def _(expected_count: int, namespace: str, environ: dict):
         actual_count = sbus_namespaces.count()
         sbus_namespaces.get(namespace)
         sbus_namespaces.get_all_namespaces()
+        widget.get_prefetch_count()
         len(sbus_namespaces.get_all_namespaces()) == 1
     except ValueError:
         actual_count = 0

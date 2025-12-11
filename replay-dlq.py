@@ -1,326 +1,187 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
-Replays messages from an Azure Service Bus subscription DLQ back to (by default) the same topic.
+A basic script to replay messages from the topic/subscription.
 
-Works with both non-session and session-enabled subscriptions.
+It is strongly recommended to specify the --to and --from values as this will
+protect you from infinity processing if messages return to the dead-letter
+queue.
+
+SYNOPSIS
+--------
+usage: replay-dlq.py [-h] [--dry-run] [--from TS_FROM] [--to TS_TO] [-v] topic subscription
+
+Replay Service Bus DLQ Messages
+
+positional arguments:
+  topic           Topic name
+  subscription    Subscription name
+
+options:
+  -h, --help      show this help message and exit
+  --dry-run       Inspect messages only — do not replay or complete
+  --from TS_FROM  Only process messages enqueued after this ISO-8601 timestamp
+  --to TS_TO      Only process messages enqueued before this ISO-8601 timestamp
+  -v, --verbose   Enable DEBUG logging
 """
 import argparse
-import asyncio
+import datetime
 import logging
 import os
-import sys
-import time
 
-from azure.servicebus import (ServiceBusMessage, ServiceBusSubQueue,
-                              TransportType)
-from azure.servicebus.aio import ServiceBusClient
-
-PROG = os.path.basename(__file__)
-logging.basicConfig(format='%(asctime)s %(levelname)s %(message)s')
-logger = logging.getLogger(PROG)
+from azure.servicebus import (ServiceBusClient, ServiceBusMessage,
+                              ServiceBusSubQueue)
 
 
-def make_args():
-    """Construct the command line arguement parser."""
-    p = argparse.ArgumentParser(
-        PROG,
-        description='Replay Azure Service Bus DLQ messages for a subscription.'
-    )
-    p.add_argument('--connection-string', '-c',
-                   default=os.getenv('ROUTER_SOURCE_CONNECTION_STRING'),
-                   help='Service Bus connection string. Default: ROUTER_SOURCE_CONNECTION_STRING env var.')
-    p.add_argument('--topic', required=True, help='Source topic name containing the subscription.')
-    p.add_argument('--subscription', required=True, help='Source subscription name (the DLQ of this is read).')
-
-    p.add_argument('--dest-topic', default=None,
-                   help='Destination topic to re-publish to. Default: same as --topic.')
-    p.add_argument('--max-messages', type=int, default=0,
-                   help='Maximum number of DLQ messages to process (0 = unlimited).')
-    p.add_argument('--max-wait', type=float, default=2.0,
-                   help='Seconds to wait for a batch before concluding no more messages are available this cycle.')
-    p.add_argument('--batch-size', type=int, default=50,
-                   help='Max messages to receive per batch (non-session).')
-    p.add_argument('--concurrency', type=int, default=1,
-                   help='Concurrent DLQ sessions to process (for session-enabled subs).')
-    p.add_argument('--sessions', action='store_true',
-                   help='Treat the subscription as session-enabled. If not set, non-session receive is used.')
-    p.add_argument('--dry-run', action='store_true',
-                   help='Do everything except actually send/complete. Useful for inspection.')
-    p.add_argument('--reason-filter', default=None,
-                   help='Only process messages whose dead-letter reason contains this substring (case-insensitive).')
-    p.add_argument('--log-level', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])
-    p.add_argument('--entity-endpoint', default=None,
-                   help='Override fully qualified namespace, e.g. "my-namespace.servicebus.windows.net". '
-                        'If not supplied, it is inferred from the connection string.')
-    p.add_argument('--use-websockets', action='store_true',
-                   help='Use AMQP over WebSockets (helpful behind firewalls/proxies).')
-    return p.parse_args()
+def parse_iso8601(ts: str):
+    """Parse ISO-8601 timestamp or return None."""
+    if ts is None:
+        return None
+    return datetime.datetime.fromisoformat(ts)
 
 
-def clone_sb_message(src: ServiceBusMessage) -> ServiceBusMessage:
-    """
-    Build a new ServiceBusMessage from an existing received message.
-
-    You cannot "un-dead-letter" in place; you must re-send.
-    """
-    # Body
-    body = b''.join(list(src.body)) if hasattr(src, 'body') else b''
-    msg = ServiceBusMessage(body)
-
-    # Application properties
-    if getattr(src, 'application_properties', None):
-        msg.application_properties = dict(src.application_properties)
-
-    # System-like props we can set on outgoing messages
-    # (You cannot set enqueued_time, sequence_number, lock tokens, etc.)
-    for attr in ('content_type', 'correlation_id', 'subject', 'to', 'reply_to',
-                 'reply_to_session_id', 'message_id', 'partition_key', 'session_id',
-                 'time_to_live'):
-        if hasattr(src, attr):
-            val = getattr(src, attr)
-            if val is not None:
-                setattr(msg, attr, val)
-
-    # Scheduling is intentionally not preserved by default. Uncomment if you want to re-schedule:
-    # if hasattr(src, 'scheduled_enqueue_time_utc') and src.scheduled_enqueue_time_utc:
-    #     msg.scheduled_enqueue_time_utc = src.scheduled_enqueue_time_utc
-
-    return msg
+def get_client() -> ServiceBusClient:
+    """Create a client from the connection string environment variable."""
+    conn_str = os.environ.get('ROUTER_SOURCE_CONNECTION_STRING')
+    return ServiceBusClient.from_connection_string(conn_str)
 
 
-def deadletter_reason_contains(msg, needle: str) -> bool:
-    """
-    Check if a dead-letter reason constains a string.
+def message_in_time_range(msg, ts_from, ts_to):
+    """Return True if the message is within the given time range."""
+    enq = msg.enqueued_time_utc
 
-    Dead-letter reason + error are exposed via "dead_letter_reason" and "dead_letter_error_description"
-    on received messages (SDK 7.10+). Fallback to application_properties just in case.
-    """
-    if not needle:
-        return True
+    if ts_from and enq < ts_from:
+        return False
+    if ts_to and enq > ts_to:
+        return False
 
-    needle = needle.lower()
-    fields = []
-
-    for name in ('dead_letter_reason', 'dead_letter_error_description'):
-        if hasattr(msg, name) and getattr(msg, name) is not None:
-            fields.append(str(getattr(msg, name)))
-
-    if getattr(msg, 'application_properties', None):
-        for k in ('DeadLetterReason', 'DeadLetterErrorDescription'):
-            if k in msg.application_properties:
-                fields.append(str(msg.application_properties.get(k)))
-
-    hay = ' '.join(fields).lower()
-    return needle in hay
+    return True
 
 
-async def process_non_session_dlq(sb_client: ServiceBusClient,
-                                  src_topic: str,
-                                  subscription: str,
-                                  dest_topic: str,
-                                  args) -> int:
-    """Process messages on a non-sessioned subscription that have been dead lettered."""
-    total = 0
+def replay_dead_letter_messages(topic: str, subscription: str, dry_run: bool, ts_from: datetime.datetime,
+                                ts_to: datetime.datetime, logger: logging.Logger):
+    """Replay dead-letter messages on a topic/subscription."""
+    client = get_client()
+    total_seen = 0
+    total_replayed = 0
+    total_filtered_out = 0
 
-    async with sb_client:
-        logger.debug(f'Creating a receiver for {src_topic}/{subscription}...')
-        receiver = sb_client.get_subscription_receiver(
-            topic_name=src_topic,
+    with client:
+        receiver = client.get_subscription_receiver(
+            topic_name=topic,
             subscription_name=subscription,
             sub_queue=ServiceBusSubQueue.DEAD_LETTER,
-            prefetch_count=args.batch_size
         )
-        logger.debug(f'Creating sender for topic {dest_topic}...')
-        sender = sb_client.get_topic_sender(topic_name=dest_topic)
+        sender = client.get_topic_sender(topic)
 
-        async with receiver, sender:
-            logger.debug('Receiver and sender opened.')
+        with receiver, sender:
+            logger.info(
+                f'{"Dry-run: inspecting" if dry_run else "Replaying"} DLQ messages for '
+                f'{topic}/{subscription}'
+            )
+
+            if ts_from:
+                logger.info(f'Filtering messages FROM: {ts_from.isoformat()}')
+            if ts_to:
+                logger.info(f'Filtering messages TO:   {ts_to.isoformat()}')
 
             while True:
-                if args.max_messages and total >= args.max_messages:
-                    break
-
-                remaining = args.max_messages - total if args.max_messages else args.batch_size
-                logger.debug('Calling receive_messages(max=%d, wait=%.1fs)...',
-                             min(args.batch_size, max(1, remaining)), args.max_wait)
-                batch = await receiver.receive_messages(
-                    max_message_count=min(args.batch_size, max(1, remaining)),
-                    max_wait_time=args.max_wait
+                messages = receiver.receive_messages(
+                    max_message_count=100,
+                    max_wait_time=5,
                 )
-
-                if not batch:
+                if not messages:
                     break
 
-                for msg in batch:
-                    if not deadletter_reason_contains(msg, args.reason_filter):
-                        # Skip without completing; just abandon so it stays in DLQ.
-                        await receiver.abandon_message(msg)
+                for msg in messages:
+                    total_seen += 1
+                    enq_time = msg.enqueued_time_utc
+
+                    if not message_in_time_range(msg, ts_from, ts_to):
+                        total_filtered_out += 1
+                        logger.debug(
+                            f'Skipping message {msg.message_id} (enqueued: {enq_time}) '
+                            '— outside time range'
+                        )
                         continue
 
-                    out = clone_sb_message(msg)
-                    try:
-                        if not args.dry_run:
-                            await sender.send_messages(out)
-                            await receiver.complete_message(msg)
-                        else:
-                            # In dry-run, just abandon to keep the message for future operations
-                            logger.info('DRY RUN: would send+complete message_id=%s', getattr(msg, 'message_id', None))
-                            await receiver.abandon_message(msg)
-                        total += 1
-                    except Exception as e:
-                        logging.exception('Failed to replay a message; deferring to keep it safe. %s', e)
-                        try:
-                            await receiver.defer_message(msg)
-                        except Exception:
-                            logging.exception('Failed to defer message; attempting abandon as fallback.')
-                            try:
-                                await receiver.abandon_message(msg)
-                            except Exception:
-                                logging.exception('Failed to abandon message.')
+                    logger.debug(
+                        f'Processing message {msg.message_id} enqueued at {enq_time}'
+                    )
 
-    return total
-
-
-async def _process_one_session(sb_client: ServiceBusClient,
-                               src_topic: str,
-                               subscription: str,
-                               dest_topic: str,
-                               args) -> int:
-    """
-    Accept the next available DLQ session and drain it.
-
-    Returns the count of replayed messages.
-    """
-    count = 0
-    async with sb_client:
-        # Accept *a* DLQ session (next available)
-        session_receiver = await sb_client.accept_next_session(
-            topic_name=src_topic,
-            subscription_name=subscription,
-            sub_queue=ServiceBusSubQueue.DEAD_LETTER
-        )
-        sender = sb_client.get_topic_sender(topic_name=dest_topic)
-        async with session_receiver, sender:
-            # Drain messages for this session
-            while True:
-                if args.max_messages and count >= args.max_messages:
-                    break
-                msgs = await session_receiver.receive_messages(
-                    max_message_count=args.batch_size, max_wait_time=args.max_wait
-                )
-                if not msgs:
-                    break
-
-                for msg in msgs:
-                    if not deadletter_reason_contains(msg, args.reason_filter):
-                        await session_receiver.abandon_message(msg)
+                    if dry_run:
+                        logger.info(f'Dry-run: would replay message ID: {msg.message_id}')
                         continue
 
-                    out = clone_sb_message(msg)
-
                     try:
-                        if not args.dry_run:
-                            await sender.send_messages(out)
-                            await session_receiver.complete_message(msg)
-                        else:
-                            await session_receiver.abandon_message(msg)
-                        count += 1
-                    except Exception as e:
-                        logging.exception('Session replay failed; deferring message. %s', e)
-                        try:
-                            await session_receiver.defer_message(msg)
-                        except Exception:
-                            logging.exception('Failed to defer; attempting abandon.')
-                            try:
-                                await session_receiver.abandon_message(msg)
-                            except Exception:
-                                logging.exception('Failed to abandon.')
-    return count
+                        new_msg = ServiceBusMessage(
+                            body=b''.join(msg.body),
+                            application_properties=msg.application_properties,
+                            content_type=msg.content_type,
+                            subject=msg.subject,
+                            correlation_id=msg.correlation_id,
+                            message_id=msg.message_id,
+                            session_id=msg.session_id,
+                        )
+
+                        sender.send_messages(new_msg)
+                        receiver.complete_message(msg)
+                        total_replayed += 1
+                        logger.debug(f'Replayed message ID: {msg.message_id}')
+
+                    except Exception as exc:
+                        logger.error(f'Failed to replay {msg.message_id}: {exc}')
+                        receiver.abandon_message(msg)
+
+    logger.info(f'Total messages inspected:   {total_seen}')
+    logger.info(f'Total messages filtered out: {total_filtered_out}')
+
+    if dry_run:
+        logger.info('Dry-run complete. No messages were replayed.')
+    else:
+        logger.info(f'Total messages replayed: {total_replayed}')
 
 
-async def process_session_dlq(sb_client: ServiceBusClient,
-                              src_topic: str,
-                              subscription: str,
-                              dest_topic: str,
-                              args) -> int:
-    """
-    Loops accepting sessions from the DLQ until none are available.
-
-    If --concurrency>1, it will try to run multiple sessions in parallel (best effort).
-    """
-    total = 0
-    # We repeatedly try to accept sessions. When no session is available, accept_next_session raises.
-    # We'll treat that as completion.
-    sem = asyncio.Semaphore(max(1, args.concurrency))
-
-    async def worker():
-        nonlocal total
-        while True:
-            await sem.acquire()
-            try:
-                count = await _process_one_session(sb_client, src_topic, subscription, dest_topic, args)
-                if count == 0:
-                    # No messages -> likely we're done with this session; try next.
-                    # If there are no more sessions, the next accept will raise and break outer loop.
-                    pass
-                total += count
-            except Exception as e:
-                # When no sessions remain, the SDK typically raises a ServiceBusError with reason=SessionCannotBeLocked.
-                logging.debug('No more DLQ sessions or error while accepting one: %s', e)
-                break
-            finally:
-                sem.release()
-
-    # Kick off N workers which will each drain sessions until none remain
-    tasks = [asyncio.create_task(worker()) for _ in range(max(1, args.concurrency))]
-    await asyncio.gather(*tasks, return_exceptions=True)
-    return total
-
-
-async def main_async(args):
-    """Execute main processing asyncronously."""
-    if not args.connection_string:
-        logging.error(
-            'ERROR: Connection string not provided. Use --connection-string or set ROUTER_SOURCE_CONNECTION_STRING.'
-        )
-        return 2
-
-    dest_topic = args.dest_topic or args.topic
-    start = time.time()
-
-    transport_type = TransportType.AmqpOverWebsocket if args.use_websockets else TransportType.Amqp
-
-    sb_client = ServiceBusClient.from_connection_string(
-        conn_str=args.connection_string,
-        transport_type=transport_type,
-        logging_enable=False
+def get_logger(verbose: bool) -> logging.Logger:
+    """Configure the logging to either be info or debug."""
+    logging.basicConfig(
+        format='%(asctime)s [%(levelname)s] %(message)s'
     )
 
-    try:
-        if args.sessions:
-            count = await process_session_dlq(sb_client, args.topic, args.subscription, dest_topic, args)
-        else:
-            count = await process_non_session_dlq(sb_client, args.topic, args.subscription, dest_topic, args)
-    finally:
-        await sb_client.close()
+    logger = logging.getLogger('replay-dlq')
 
-    dur = time.time() - start
-    logging.info('Done. Replayed %d message(s) in %.2fs%s.',
-                 count, dur, ' [DRY RUN]' if args.dry_run else '')
-    return 0
+    if verbose:
+        logger.setLevel(logging.DEBUG)
+    else:
+        logger.setLevel(logging.INFO)
+
+    return logger
 
 
-def main():
-    """Execute if called from the CLI."""
-    args = make_args()
-    logger.setLevel(args.log_level)
-    try:
-        rc = asyncio.run(main_async(args))
-    except KeyboardInterrupt:
-        logging.warning('Interrupted.')
-        rc = 130
-    sys.exit(rc)
+def parse_args():
+    """Parse the command line arguments."""
+    parser = argparse.ArgumentParser(description='Replay Service Bus DLQ Messages')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Inspect messages only — do not replay or complete')
+    parser.add_argument('--from', dest='ts_from', help='Only process messages enqueued after this ISO-8601 timestamp')
+    parser.add_argument('--to', dest='ts_to', help='Only process messages enqueued before this ISO-8601 timestamp')
+    parser.add_argument('-v', '--verbose', action='store_true',
+                        help='Enable DEBUG logging', required=False)
+    parser.add_argument('topic', help='Topic name')
+    parser.add_argument('subscription', help='Subscription name')
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
-    main()
+    args = parse_args()
+    logger = get_logger(args.verbose)
+    ts_from = parse_iso8601(args.ts_from)
+    ts_to = parse_iso8601(args.ts_to)
+
+    replay_dead_letter_messages(
+        topic=args.topic,
+        subscription=args.subscription,
+        dry_run=args.dry_run,
+        ts_from=ts_from,
+        ts_to=ts_to,
+        logger=logger
+    )

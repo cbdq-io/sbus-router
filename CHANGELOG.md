@@ -5,6 +5,35 @@
 
 ### Fix
 
+* Optionally disable lock renewal. [Ben Dalling]
+
+* Set max_wait_time for non-sessioned receivers. [Ben Dalling]
+
+* Enable the renewal of locks for non-session enabled messages. [Ben Dalling]
+
+* Bump Python version from 3.12 to 3.14. [Ben Dalling]
+
+* Ensure replay-dlq.py can handle sessioned subscriptions. [Ben Dalling]
+
+* Renew session lock on sessioned receivers. [Ben Dalling]
+
+* Simplify the replay-dlq.py script. [Ben Dalling]
+
+* Remove ineffective lock renewal and make abandon and complete more robust. [Ben Dalling]
+
+### Build
+
+* Release/1.0.0. [Ben Dalling]
+
+### Tests
+
+* Reduce code coverage [again] [Ben Dalling]
+
+
+## 0.13.1 (2025-11-20)
+
+### Fix
+
 * Re-enable the DLQ message checks. [Ben Dalling]
 
 ### Documentation
