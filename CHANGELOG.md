@@ -1,7 +1,7 @@
 # Changelog
 
 
-## Unreleased
+## 1.0.0 (2025-12-11)
 
 ### Fix
 
@@ -20,6 +20,10 @@
 * Simplify the replay-dlq.py script. [Ben Dalling]
 
 * Remove ineffective lock renewal and make abandon and complete more robust. [Ben Dalling]
+
+### Build
+
+* Release/1.0.0. [Ben Dalling]
 
 ### Tests
 
