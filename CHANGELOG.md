@@ -21,6 +21,10 @@
 
 * Remove ineffective lock renewal and make abandon and complete more robust. [Ben Dalling]
 
+### Build
+
+* Release/1.0.0. [Ben Dalling]
+
 ### Tests
 
 * Reduce code coverage [again] [Ben Dalling]
