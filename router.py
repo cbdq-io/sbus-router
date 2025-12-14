@@ -950,7 +950,9 @@ class ServiceBusHandler:
             )
 
             if not messages:
-                # Nothing available right now; loop again
+                if receiver.session is not None:
+                    # Session drained – exit so receiver can close
+                    return
                 continue
 
             for message in messages:
@@ -975,6 +977,9 @@ class ServiceBusHandler:
                     finally:
                         if renew_task:
                             renew_task.cancel()
+
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await renew_task
             except asyncio.CancelledError:
                 break
             except OperationTimeoutError:

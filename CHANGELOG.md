@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Fix
+
+* Correct memory leak for session enabled receivers. [Ben Dalling]
+
+
 ## 1.0.0 (2025-12-11)
 
 ### Fix
