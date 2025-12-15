@@ -64,15 +64,15 @@ def _():
     pass
 
 
-@then(parsers.parse('max_auto_renew_duration is {max_auto_renew_duration:d}'))
-def _(max_auto_renew_duration: int, router_rule: RouterRule):
-    """max_auto_renew_duration is <max_auto_renew_duration>."""
-    assert max_auto_renew_duration == router_rule.max_auto_renew_duration
-
-
 @then(parsers.parse('max_tasks is {max_tasks:d}'))
 def _(max_tasks: int, router_rule: RouterRule):
     """max_tasks is <max_tasks>."""
+    if max_tasks == 0:
+        assert router_rule.is_session_rule
+        max_tasks = None
+    else:
+        assert router_rule.is_non_session_rule
+
     assert max_tasks == router_rule.max_tasks
 
 

@@ -1,51 +1,14 @@
 {
-  "$schema": "http://json-schema.org/draft-04/schema#",
-  "dependencies": {
-    "jmespath": {
-      "oneOf": [
-        {
-          "required": [
-            "regexp"
-          ]
-        },
-        {
-          "not": {
-            "required": [
-              "regexp"
-            ]
-          }
-        }
-      ]
-    }
-  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+
   "properties": {
     "destination_namespaces": {
-      "description": "The namespaces (comma separated) to which data will be sent."
+      "description": "The namespaces (comma separated) to which data will be sent.",
+      "type": "string"
     },
     "destination_topics": {
       "description": "The topics (comma separated) to which data will be sent.",
-      "type": "string"
-    },
-    "is_session_required": {
-      "default": false,
-      "description": "Are sessions required for the source subscription?",
-      "type": "boolean"
-    },
-    "jmespath": {
-      "description": "A JMESPath expression used for querying data.",
-      "type": "string"
-    },
-    "max_auto_renew_duration": {
-      "description": "The time in seconds to allow messages for this topic to be locked for (default: 300).",
-      "type": "integer"
-    },
-    "max_tasks": {
-      "description": "The maximum number of concurrent tasks allowed (optional).",
-      "type": "integer",
-      "minimum": 1
-    },
-    "regexp": {
-      "description": "A regular expression pattern for matching data.",
       "type": "string"
     },
     "source_subscription": {
@@ -55,13 +18,57 @@
     "source_topic": {
       "description": "The topic from which data will be retrieved.",
       "type": "string"
+    },
+
+    "jmespath": {
+      "description": "A JMESPath expression used for querying data.",
+      "type": "string"
+    },
+    "regexp": {
+      "description": "A regular expression pattern for matching data.",
+      "type": "string"
+    },
+
+    "max_tasks": {
+      "description": "Maximum number of concurrent tasks for non-session subscriptions.",
+      "type": "integer",
+      "minimum": 1
+    },
+
+    "session_id_list": {
+      "description": "Explicit list of session IDs to consume. Presence enables session mode.",
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "uniqueItems": true
     }
   },
+
   "required": [
     "destination_namespaces",
     "destination_topics",
     "source_subscription",
     "source_topic"
   ],
-  "type": "object"
+
+  "dependencies": {
+    "jmespath": {
+      "oneOf": [
+        { "required": ["regexp"] },
+        { "not": { "required": ["regexp"] } }
+      ]
+    }
+  },
+
+  "oneOf": [
+    {
+      "title": "Non-session rule",
+      "not": { "required": ["session_id_list"] }
+    },
+    {
+      "title": "Session-enabled rule",
+      "required": ["session_id_list"],
+      "not": { "required": ["max_tasks"] }
+    }
+  ]
 }
