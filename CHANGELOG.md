@@ -3,19 +3,19 @@
 
 ## Unreleased
 
-### Fix
+### Features
 
-* Session enabled routing is reliable but far too slow. [Ben Dalling]
+* Configure session receivers by session ID BREAKING CHANGE:  abandons trying to dynamically consume session enabled receivers. [Ben Dalling]
+
+### Fix
 
 * Correct memory leak for session enabled receivers. [Ben Dalling]
 
 ### Other
 
-* TO BE SQUASHED. [Ben Dalling]
+* Squashed commit of the following: [Ben Dalling]
 
-* TO BE SQUASHED. [Ben Dalling]
-
-* TO BE SQUASHED. [Ben Dalling]
+  commit bd2b5f550e35912db208df6a0d3d0ddcceac128e
 
 
 ## 1.0.0 (2025-12-11)
