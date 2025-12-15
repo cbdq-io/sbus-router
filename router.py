@@ -59,7 +59,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '1.0.0'
+__version__ = '2.0.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -577,26 +577,6 @@ class EnvironmentConfigParser:
 
         return response
 
-    def topics_and_subscriptions(self) -> list:
-        """
-        Extract a list of the source topics and subscriptions.
-
-        Returns
-        -------
-        list[tuple]
-            A list of tuples (topic_name, subscription_name).
-        """
-        response = []
-        rules = self.get_rules()
-
-        for rule in rules:
-            instance = (rule.source_topic, rule.source_subscription, rule.max_tasks)
-
-            if instance not in response:
-                response.append(instance)
-
-        return response
-
 
 class ServiceBusHandler:
     """
@@ -726,18 +706,20 @@ class ServiceBusHandler:
 
         # Load rules FIRST (required for session detection)
         self.rules = config.get_rules()
-        self.session_inputs = []      # (topic, subscription, session_id)
-        self.nonsession_inputs = []  # (topic, subscription, max_tasks)
+        self.session_inputs = set()
+        self.nonsession_inputs = {}
 
         for rule in self.rules:
+            key = (rule.source_topic, rule.source_subscription)
+
             if rule.is_session_rule:
                 for session_id in rule.session_id_list:
-                    self.session_inputs.append(
-                        (rule.source_topic, rule.source_subscription, session_id)
-                    )
+                    self.session_inputs.add((*key, session_id))
             else:
-                self.nonsession_inputs.append(
-                    (rule.source_topic, rule.source_subscription, rule.max_tasks)
+                # enforce max_tasks per topic/subscription
+                self.nonsession_inputs[key] = max(
+                    self.nonsession_inputs.get(key, 0),
+                    rule.max_tasks,
                 )
 
         logger.info(
@@ -747,13 +729,15 @@ class ServiceBusHandler:
 
         self.input_topics = []
 
-        for topic, subscription, _ in self.nonsession_inputs:
+        for (topic, subscription), _max_tasks in self.nonsession_inputs.items():
             key = (topic, subscription)
+
             if key not in self.input_topics:
                 self.input_topics.append(key)
 
         for topic, subscription, _ in self.session_inputs:
             key = (topic, subscription)
+
             if key not in self.input_topics:
                 self.input_topics.append(key)
 
@@ -1030,7 +1014,7 @@ class ServiceBusHandler:
                 await self.process_message(topic_name, message, receiver)
 
     async def receive_and_process(self, topic_name, subscription_name):
-        """Receive messages, process them, and forward ONE session or non-session run."""
+        """Receive messages and process messages from a non-session enabled receiver."""
         if not self.source_client:
             logger.error('Source client is not initialized, cannot receive messages.')
             return
@@ -1053,7 +1037,7 @@ class ServiceBusHandler:
                     await renew_task
 
     async def receive_and_process_session(self, topic_name, subscription_name, session_id):
-        """Receive a process messages from a session enabled receiver."""
+        """Receive messages and process messages from a session enabled receiver."""
         if not self.source_client:
             logger.error('Source client is not initialized, cannot receive messages.')
             return
@@ -1078,35 +1062,38 @@ class ServiceBusHandler:
                 with contextlib.suppress(asyncio.CancelledError):
                     await renew_task
 
-    async def _run_sessions(self):
-        """Continuously run receivers for session-enabled subscriptions."""
-        while not self.shutdown_event.is_set():
-            tasks = []
-
-            for topic, subscription, max_tasks in self.session_inputs:
-                for _ in range(max_tasks):
-                    tasks.append(
-                        asyncio.create_task(
-                            self.receive_and_process(topic, subscription)
-                        )
+        """Run receivers for session-enabled subscriptions."""
+        async def supervise_session(topic, subscription, session_id):
+            while not self.shutdown_event.is_set():
+                try:
+                    await self.receive_and_process_session(
+                        topic, subscription, session_id
                     )
+                except asyncio.CancelledError:
+                    return
+                except Exception as e:
+                    logger.error(
+                        f'Session worker crashed for '
+                        f'{topic}/{subscription} session_id={session_id}: {e}'
+                    )
+                    await asyncio.sleep(1)  # backoff before restart
 
-            done, pending = await asyncio.wait(
-                tasks,
-                return_when=asyncio.FIRST_COMPLETED
+        tasks = [
+            asyncio.create_task(
+                supervise_session(topic, subscription, session_id)
             )
+            for topic, subscription, session_id in self.session_inputs
+        ]
 
-            for task in pending:
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
+        logger.info(f'Started {len(tasks)} supervised session workers.')
+        await asyncio.gather(*tasks)
 
     async def _run_nonsessions(self):
         """Control receivers for non-session subscriptions."""
         while not self.shutdown_event.is_set():
             tasks = []
 
-            for topic, subscription, max_tasks in self.nonsession_inputs:
+            for (topic, subscription), max_tasks in self.nonsession_inputs.items():
                 for _ in range(max_tasks):
                     tasks.append(
                         asyncio.create_task(
@@ -1124,14 +1111,39 @@ class ServiceBusHandler:
                 with contextlib.suppress(asyncio.CancelledError):
                     await t
 
+    async def _supervise_single_session(self, topic, subscription, session_id):
+        """Supervise exactly ONE session forever."""
+        logger.info(
+            f'Started supervised session worker for '
+            f'{topic}/{subscription} (session_id={session_id})'
+        )
+
+        while not self.shutdown_event.is_set():
+            try:
+                await self.receive_and_process_session(
+                    topic, subscription, session_id
+                )
+            except asyncio.CancelledError:
+                return
+            except Exception as e:
+                logger.error(
+                    f'Session worker crashed for '
+                    f'{topic}/{subscription} (session_id={session_id}): {e}'
+                )
+                await asyncio.sleep(1)
+
     async def run(self):
         """Run session and non-session receivers correctly."""
         await self.wait_for_amqp_ready()
 
         runners = []
 
-        if self.session_inputs:
-            runners.append(asyncio.create_task(self._run_sessions()))
+        for topic, subscription, session_id in self.session_inputs:
+            runners.append(
+                asyncio.create_task(
+                    self._supervise_single_session(topic, subscription, session_id)
+                )
+            )
 
         if self.nonsession_inputs:
             runners.append(asyncio.create_task(self._run_nonsessions()))

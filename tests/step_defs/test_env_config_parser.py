@@ -58,7 +58,6 @@ def _(method_name: str, expected_value: str, environ: dict):
         actual_value = widget.get_prometheus_port()
     elif method_name == 'get_rules':
         ServiceBusHandler(widget)
-        widget.topics_and_subscriptions()
         actual_value = widget.get_rules()[0].name()
         expected_value = widget.get_rules()[0].name()
     elif method_name == 'get_ts_app_prop_name':

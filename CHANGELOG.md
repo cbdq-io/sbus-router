@@ -5,7 +5,17 @@
 
 ### Fix
 
+* Session enabled routing is reliable but far too slow. [Ben Dalling]
+
 * Correct memory leak for session enabled receivers. [Ben Dalling]
+
+### Other
+
+* TO BE SQUASHED. [Ben Dalling]
+
+* TO BE SQUASHED. [Ben Dalling]
+
+* TO BE SQUASHED. [Ben Dalling]
 
 
 ## 1.0.0 (2025-12-11)
