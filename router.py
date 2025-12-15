@@ -1053,6 +1053,7 @@ class ServiceBusHandler:
                     await renew_task
 
     async def receive_and_process_session(self, topic_name, subscription_name, session_id):
+        """Receive a process messages from a session enabled receiver."""
         if not self.source_client:
             logger.error('Source client is not initialized, cannot receive messages.')
             return
