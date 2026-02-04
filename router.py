@@ -6,7 +6,7 @@ LICENCE
 -------
 BSD 3-Clause License
 
-Copyright (c) 2024,2025, Cloud Based DQ Ltd.
+Copyright (c) 2024 - 2026, Cloud Based DQ Ltd.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -1180,11 +1180,11 @@ async def main():
         loop.add_signal_handler(signal.SIGTERM, shutdown)
         loop.add_signal_handler(signal.SIGINT, shutdown)  # Handle CTRL+C
 
-        await handler.run()      # Start processing messages
-        await stop_event.wait()  # Wait for shutdown signal
+        await handler.run()
+        await stop_event.wait()
 
     finally:
-        await handler.close()    # Ensure all connections are properly closed
+        await handler.close()
 
 
 if __name__ == '__main__':
