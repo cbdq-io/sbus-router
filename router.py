@@ -1165,26 +1165,35 @@ class ServiceBusHandler:
 
 
 async def main():
-    """Configure the handler."""
+    """Configure and run the Service Bus handler with graceful shutdown."""
     handler = ServiceBusHandler(EnvironmentConfigParser())
+    await handler.start()
+
+    loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
+
+    def shutdown():
+        logger.warning('Shutdown signal received...')
+        handler.shutdown_event.set()
+        stop_event.set()
+
+    loop.add_signal_handler(signal.SIGTERM, shutdown)
+    loop.add_signal_handler(signal.SIGINT, shutdown)
+
+    run_task = asyncio.create_task(handler.run())
 
     try:
-        await handler.start()
-        loop = asyncio.get_running_loop()
-        stop_event = asyncio.Event()
-
-        def shutdown():
-            logger.warning('Shutdown signal received. Cleaning up...')
-            stop_event.set()
-
-        loop.add_signal_handler(signal.SIGTERM, shutdown)
-        loop.add_signal_handler(signal.SIGINT, shutdown)  # Handle CTRL+C
-
-        await handler.run()
         await stop_event.wait()
 
     finally:
+        logger.warning('Waiting for router task to finish...')
+        run_task.cancel()
+
+        with contextlib.suppress(asyncio.CancelledError):
+            await run_task
+
         await handler.close()
+        logger.warning('Shutdown complete.')
 
 
 if __name__ == '__main__':
