@@ -20,7 +20,7 @@ def test_test_rules_against_input_files():
 @given(parsers.parse('a RouterRule definition of {rule_definition}'), target_fixture='router_rule')
 def _(rule_definition: str):
     """a RouterRule definition of <rule_definition>."""
-    return RouterRule('test', rule_definition, 1)
+    return RouterRule('test', rule_definition)
 
 
 @given(parsers.parse('an Invalid Router Rule of {rule}'), target_fixture='rule_string')
@@ -64,16 +64,10 @@ def _():
     pass
 
 
-@then(parsers.parse('max_auto_renew_duration is {max_auto_renew_duration:d}'))
-def _(max_auto_renew_duration: int, router_rule: RouterRule):
-    """max_auto_renew_duration is <max_auto_renew_duration>."""
-    assert max_auto_renew_duration == router_rule.max_auto_renew_duration
-
-
-@then(parsers.parse('max_tasks is {max_tasks:d}'))
-def _(max_tasks: int, router_rule: RouterRule):
-    """max_tasks is <max_tasks>."""
-    assert max_tasks == router_rule.max_tasks
+@then(parsers.parse('session_count is {session_count:d}'))
+def _(session_count: int, router_rule: RouterRule):
+    """session_count is <session_count>."""
+    assert session_count == router_rule.session_count
 
 
 @then(parsers.parse('the RouterRule match is {is_match}'))
@@ -96,6 +90,6 @@ def _(is_match: str, router_rule: RouterRule, message_contents: str, source_topi
 def _(rule_string: str):
     """the SystemExit is 2."""
     with pytest.raises(SystemExit) as exit_info:
-        RouterRule('test', rule_string, 1)
+        RouterRule('test', rule_string)
 
     assert exit_info.value.code == 2

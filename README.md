@@ -12,9 +12,7 @@ least one rule configured  (see below).
 | LOG_FORMAT | No | "%(levelname)s [%(filename)s:%(lineno)d] %(message)s" | The log format (passed to `logging.basicConfig) |
 | LOG_LEVEL | | WARN | The log level for the router.|
 | ROUTER_BATCH_MAX_MESSAGES | No | 256 | The max messages collected before sending as a batch. |
-| ROUTER_BATCH_MAX_WAIT_MS | No | 10 | The max time in milliseconds to wait before sending a batch. |
 | ROUTER_CUSTOM_TRANSFORMER | No | N/A | See below. |
-| ROUTER_MAX_TASKS | No | 1 | The number of tasks to allocate to each topic/subscription. |
 | ROUTER_PREFETCH_COUNT | No | 100 | The maximum number of messages to cache with each request to the service. |
 | ROUTER_PROMETHEUS_PORT | No | 8000 | The port for Prometheus to start on. |
 | ROUTER_SOURCE_CONNECTION_STRING | Yes | | The connection string for the source Service Bus namespace. |
@@ -39,17 +37,13 @@ The configurable fields for rules are:
   considered valid, not be produced onto the DLQ, but will be dropped.
   Topics can be comma separated which means that the messages that match
   the rule will be sent to each of the topics.
-- `is_session_required`: Does the source subscription require sessions?
 - `jmespath`: A [JMESPath](https://jmespath.org/) expression to query an
   element within the JSON contained in the message.
-- `max_auto_renew_duration`: The time in seconds to allow messags for this
-  topic to be locked for (default: 300).
-- `max_tasks`: Allow the user to override any value for a single topic set
-  by the `MAX_TASKS` environment variable.  If set for any rule, should be
-  set consistently for all rules on that topic.
 - `regexp`: A
   [regular expression](https://en.wikipedia.org/wiki/Regular_expression)
   that will me used to match against the data returned from `jmespath`.
+- `session_count`: The number of sessions on the subscription.  Defaults to
+  0 which indicates that the subscription is not session enabled.
 - `source_subscription`: The subscription from which data will be retrieved.
 - `source_topic`: The topic from which data will be retrieved.
 
@@ -95,6 +89,12 @@ The followng links can assist in crafting rules and regular expressions:
 
 ## Breaking Changes
 
-The ability to configure a custom sender hook (introduced in version 0.4.0) has
-been removed in version 0.10.0.  It has been replaced with the custom transform
-hook.
+- Version 2.0.0 removed the concept of setting task counts by allowing the router
+  to work this out itself from the number of receivers required.  Also in the
+  router rules, the number of sessions (default is zero indicating that the
+  subscription is not session enabled) are now set in the topic rules with
+  `session_count` which replaces `is_session_required`.  We also removed
+  `max_auto_renew_duration`.
+- The ability to configure a custom sender hook (introduced in version 0.4.0) has
+  been removed in version 0.10.0.  It has been replaced with the custom transform
+  hook.
