@@ -1,6 +1,19 @@
 # Changelog
 
 
+## Unreleased
+
+### Features
+
+* Replace is_session_required with session_count and remove max_auto_renew_duration and max_tasks from the rule definitions. [Ben Dalling]
+
+### Fix
+
+* Refactor how batching is handled. [Ben Dalling]
+
+* A more graceful shutdown of the handler. [Ben Dalling]
+
+
 ## 1.0.0 (2025-12-11)
 
 ### Fix
