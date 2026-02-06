@@ -959,24 +959,33 @@ class ServiceBusHandler:
     async def send_messages(self, sender: ServiceBusSender, messages: list[ServiceBusMessage]):
         """Send a list of messages to the provided sender."""
         if not messages:
-            return
+                return
 
         batch = await sender.create_message_batch()
 
         for message in messages:
             try:
                 batch.add_message(message)
+                continue
             except ValueError:
-                # Batch is full
+                # Current batch is full OR message too large
+                pass
+
+            # Flush current batch if it has data
+            if len(batch) > 0:
                 await sender.send_messages(batch)
-                batch = await sender.create_message_batch()
 
-                try:
-                    batch.add_message(message)
-                except ValueError:
-                    # Single message too large for a batch
-                    await sender.send_messages(message)
+            # Start a new batch
+            batch = await sender.create_message_batch()
 
+            try:
+                batch.add_message(message)
+            except ValueError:
+                # Message is too large to fit even in an empty batch
+                # Send it individually (this is required by the SDK contract)
+                await sender.send_messages(message)
+
+        # Final flush (only if batch has data)
         if len(batch) > 0:
             await sender.send_messages(batch)
 
