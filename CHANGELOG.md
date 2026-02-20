@@ -9,6 +9,10 @@
 
 ### Fix
 
+* Handle receivers differently depending on if sessions are enabled or not. [Ben Dalling]
+
+* Correct edge case when first message is unable to be added to a batch. [Ben Dalling]
+
 * Refactor how batching is handled. [Ben Dalling]
 
 * A more graceful shutdown of the handler. [Ben Dalling]
