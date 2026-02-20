@@ -55,21 +55,14 @@ import jsonschema.exceptions
 from azure.servicebus import (NEXT_AVAILABLE_SESSION, ServiceBusMessage,
                               ServiceBusReceivedMessage)
 from azure.servicebus.aio import (AutoLockRenewer, ServiceBusClient,
-                                  ServiceBusReceiver, ServiceBusSender)
+                                  ServiceBusReceiver)
 from azure.servicebus.amqp import AmqpMessageBodyType
-from azure.servicebus.exceptions import (MessageAlreadySettled,
-                                         OperationTimeoutError,
-                                         ServiceBusConnectionError,
-                                         ServiceBusError, SessionLockLostError)
-from prometheus_client import Counter, start_http_server
+from azure.servicebus.exceptions import OperationTimeoutError
+from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '2.0.0'
+__version__ = '0.13.1'
+PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
-IGNORABLE_SETTLEMENT_EXCEPTIONS = (
-    MessageAlreadySettled,
-    SessionLockLostError,
-    OperationTimeoutError
-)
 
 
 def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> logging.Logger:
@@ -101,12 +94,12 @@ logging.basicConfig(
 )
 logger = get_logger(__file__)
 
-# -------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 # Optional: pure, synchronous message transformer
 # Configure with ROUTER_CUSTOM_TRANSFORMER="module:function"
-# Contract: def transform(msg: ServiceBusMessage, topic_name: str, logger: logging.Logger) -> ServiceBusMessage
+# Contract: def transform(msg: ServiceBusMessage, topic_name: str) -> ServiceBusMessage
 # No I/O, no await; either mutate and return the same instance or return a new one.
-# -------------------------------------------------------------------------------------------------------------
+# --------------------------------------------------------------------------------------
 _transformer: Optional[Callable[[ServiceBusMessage, str], ServiceBusMessage]] = None
 _transformer_module = None
 _transformer_spec = os.getenv('ROUTER_CUSTOM_TRANSFORMER')
@@ -125,39 +118,39 @@ if _transformer_spec:
         _transformer_module = None
 
 
-class BatchParseOutcome:
+async def extract_message_body(message: ServiceBusMessage) -> str:
     """
-    The outcome from the BatchParser.parse method.
+    Extract and return the message body as a UTF-8 string.
 
-    Attributes
+    Uses `message.body_type` to handle different encoding scenarios.
+
+    Parameters
     ----------
-    matched_rules_counts : dict[str, int]
-        A dictionary of how many rule names have been matched.
-    non_routable_messages : list[ServiceBusMessage]
-        The messages that don't match any router rules and therefore
-        should be dead-lettered.
-    routable_messages : dict[str, dict[str, list[ServiceBusMessage]]]
-        A dictionary that describes the messages that can be routed.  The
-        first str is the destination key, the second level key is the
-        name of the destination topic which gives a list of messages
-        to be sent to it.
+    message : ServiceBusMessage
+        The message received from Azure Service Bus.
+
+    Returns
+    -------
+    str
+        The extracted message body as a string.
+
+    Raises
+    ------
+    TypeError
+        If the body type is unsupported.
     """
+    body_type = message.body_type
 
-    matched_rules_counts: dict[str, int]
-    settlement_plan: list[tuple[str, ServiceBusReceivedMessage]]
-    routable_messages: dict[str, dict[str, list[tuple[ServiceBusReceivedMessage, ServiceBusMessage]]]]
+    if body_type == AmqpMessageBodyType.DATA:
+        return b''.join(message.body).decode()
 
-    def __init__(self):
-        self.settlement_plan = []
-        self.matched_rules_counts = {}
-        self.routable_messages = {}
+    if body_type == AmqpMessageBodyType.SEQUENCE:
+        return json.dumps(message.body)
 
-    def increment_matched_rule(self, rule_name: str) -> None:
-        """Increment the count for the given rule name."""
-        if rule_name not in self.matched_rules_counts:
-            self.matched_rules_counts[rule_name] = 0
+    if body_type == AmqpMessageBodyType.VALUE:
+        return str(message.body)
 
-        self.matched_rules_counts[rule_name] += 1
+    raise TypeError(f'Unsupported message body type: {body_type}')
 
 
 class RouterRule:
@@ -181,10 +174,15 @@ class RouterRule:
         The destination topics for the messages matching this rule.
     jmespath : str
         A JMESPath string for checking against a JSON payload.
+    max_auto_renew_duration : int
+        The time in seconds to allow messags for this topic to be locked for (default: 300).
     regexp : str
         A regular expression for comparing against the message.
     source_topic : str
         The name of the source topic that makes up some of the matching criteria for the rule.
+    session_count : int
+        The number of sessions on the subscription.  Defaults to zero which
+        indicates that the subscription is not session enabled.
     """
 
     def __init__(self, name: str, definition: str) -> None:
@@ -375,135 +373,6 @@ class RouterRule:
         return instance
 
 
-class BatchParser:
-    """
-    Parse batches of messages to destinations.
-
-    Attributes
-    ----------
-    rules : list[RouterRules]
-        The rules provided by the constructor.
-
-    Parameters
-    ----------
-    rules : list[RouterRules]
-        The rules to check the messages against.
-    """
-
-    def __init__(self, rules: list[RouterRule]):
-        self.rules = rules
-        self.router_timestamp_app_property_name = os.environ.get('ROUTER_TIMESTAMP_APP_PROPERTY_NAME')
-
-    def get_message_body(self, message: ServiceBusReceivedMessage) -> str:
-        """Get the message body from a received message as a string."""
-        body_type = message.body_type
-
-        if body_type == AmqpMessageBodyType.DATA:
-            return b''.join(message.body).decode()
-
-        if body_type == AmqpMessageBodyType.SEQUENCE:
-            return json.dumps(message.body)
-
-        if body_type == AmqpMessageBodyType.VALUE:
-            return str(message.body)
-
-        raise TypeError(f'Unsupported message body type: {body_type}')
-
-    def get_message_body_data(self, body: str) -> str:
-        """Parse the body as a JSON string."""
-        try:
-            return json.loads(body)
-        except json.decoder.JSONDecodeError:
-            return None
-
-    def output_message(self, input_message: ServiceBusReceivedMessage, body: str, dest_topic: str) -> ServiceBusMessage:
-        """Clone/enrich a message for sending from a received message."""
-        application_properties = dict(input_message.application_properties or {})
-
-        if self.router_timestamp_app_property_name:
-            application_properties[self.router_timestamp_app_property_name] = datetime.datetime.now(datetime.UTC) \
-                .isoformat(timespec='milliseconds') \
-                .replace('+00:00', 'Z')
-
-        application_properties['__src_enqueued_time_utc'] = input_message \
-            .enqueued_time_utc.isoformat(timespec='milliseconds') \
-            .replace('+00:00', 'Z')
-        output_message = ServiceBusMessage(
-            body=body,
-            application_properties=application_properties,
-            session_id=input_message.session_id
-        )
-
-        if _transformer:
-            try:
-                out = _transformer(output_message, dest_topic, logger)
-
-                if isinstance(out, ServiceBusMessage):
-                    return out
-            except Exception as e:
-                logger.error(f'Custom transformer raised an exception: {e}')
-
-        return output_message
-
-    def parse(self, source_topic_name: str, input_messages: list[ServiceBusReceivedMessage]) -> BatchParseOutcome:
-        """
-        Parse input messages and populate the BatchParseOutcome.
-
-        Parameters
-        ----------
-        source_topic_name : str
-            The name of the source topic.
-        input_messages : list[ServiceBusReceivedMessage]
-            The messages to be parsed.
-
-        Returns
-        -------
-        BatchParseOutcome
-            The routable and non-routable messages.
-        """
-        response = BatchParseOutcome()
-
-        for message in input_messages:
-            data = None
-            body = self.get_message_body(message)
-            matched = False
-
-            for rule in self.rules:
-                if rule.jmespath and data is None:
-                    data = self.get_message_body_data(body)
-
-                is_match, dest_namespaces, dest_topics = rule.is_match(source_topic_name, body, data)
-
-                if is_match:
-                    response.increment_matched_rule(rule.name())
-
-                    for dest_namespace in dest_namespaces:
-                        if dest_namespace not in response.routable_messages:
-                            response.routable_messages[dest_namespace] = {}
-
-                        for dest_topic in dest_topics:
-                            if dest_topic not in response.routable_messages[dest_namespace]:
-                                response.routable_messages[dest_namespace][dest_topic] = []
-
-                            response.routable_messages[dest_namespace][dest_topic].append(
-                                (
-                                    message,
-                                    self.output_message(message, body, dest_topic)
-                                )
-                            )
-
-                    response.settlement_plan.append(('complete', message))
-                    matched = True
-                    break
-
-            if not matched:
-                logger.warning(f'No rules match message from {source_topic_name}, sending to the DLQ.')
-                response.settlement_plan.append(('deadletter', message))
-                DLQ_COUNT.inc()
-
-        return response
-
-
 class ServiceBusNamespaces:
     """A class for holding details of Service Bus namespaces."""
 
@@ -579,7 +448,7 @@ class EnvironmentConfigParser:
         Returns
         -------
         int
-            The number of messages to be prefetched. If not provided, default is 100.
+            The number of messages to be prefetched. If not provided, default is 300.
         """
         return int(self._environ.get('ROUTER_PREFETCH_COUNT', '100'))
 
@@ -725,6 +594,111 @@ class ServiceBusHandler:
         The configuration as set by environment variables.
     """
 
+    # -------------------------
+    # Batching configuration
+    # -------------------------
+    _BATCH_MAX_WAIT_MS = int(os.getenv('ROUTER_BATCH_MAX_WAIT_MS', '10'))
+    _BATCH_MAX_MESSAGES = int(os.getenv('ROUTER_BATCH_MAX_MESSAGES', '256'))
+
+    class _Batcher:
+        """
+        Per-destination coalescing buffer with per-item acknowledgements.
+
+        Queues tuples of (ServiceBusMessage, Future) and flushes them as one or
+        more Service Bus batches once either:
+          - max_wait has elapsed, or
+          - max_messages have been collected.
+
+        The Future resolves only after the send for the batch that contains
+        that message completes (success or exception).
+        """
+
+        def __init__(self, sender_factory: Callable, max_wait_ms: int, max_msgs: int, topic_name: str):
+            self.sender_factory = sender_factory
+            self.queue: asyncio.Queue[Optional[tuple[ServiceBusMessage, asyncio.Future]]] = asyncio.Queue()
+            self.max_wait = max_wait_ms / 1000.0
+            self.max_msgs = max_msgs
+            self.topic_name = topic_name
+            self._task = asyncio.create_task(self._run())
+            self._sender = None
+
+        async def add_and_wait(self, msg: ServiceBusMessage) -> None:
+            fut: asyncio.Future = asyncio.get_running_loop().create_future()
+            await self.queue.put((msg, fut))
+            await fut
+
+        async def close(self) -> None:
+            await self.queue.put(None)
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+        async def _run(self):
+            self._sender = await self.sender_factory()
+            while True:
+                items = await self._coalesce()
+                if items is None:
+                    # sentinel -> flush nothing further and exit
+                    await self._flush([])
+                    break
+                await self._flush(items)
+
+        async def _coalesce(self):
+            first = await self.queue.get()
+            if first is None:
+                return None
+
+            items = [first]
+            deadline = asyncio.get_running_loop().time() + self.max_wait
+
+            while len(items) < self.max_msgs:
+                timeout = deadline - asyncio.get_running_loop().time()
+                if timeout <= 0:
+                    break
+                try:
+                    nxt = await asyncio.wait_for(self.queue.get(), timeout=timeout)
+                except asyncio.TimeoutError:
+                    break
+                if nxt is None:
+                    # re-queue sentinel for the outer loop to exit next round
+                    self.queue.put_nowait(None)
+                    break
+                items.append(nxt)
+
+            return items
+
+        async def _flush(self, items):
+            if not items:
+                return
+
+            batch = await self._sender.create_message_batch()
+            pending: list[tuple[ServiceBusMessage, asyncio.Future]] = []
+
+            async def flush_batch():
+                if not pending:
+                    return
+                try:
+                    await self._sender.send_messages(batch)
+                    for _, fut in pending:
+                        if not fut.done():
+                            fut.set_result(True)
+                except Exception as e:
+                    for _, fut in pending:
+                        if not fut.done():
+                            fut.set_exception(e)
+
+            for msg, fut in items:
+                try:
+                    batch.add_message(msg)
+                    pending.append((msg, fut))
+                except ValueError:
+                    # current batch full -> send and start a new one
+                    await flush_batch()
+                    batch = await self._sender.create_message_batch()
+                    batch.add_message(msg)
+                    pending = [(msg, fut)]
+
+            await flush_batch()
+
     def __init__(self, config: EnvironmentConfigParser):
         self.source_connection_string = config.get_source_connection_string()
         self.config = config
@@ -739,12 +713,16 @@ class ServiceBusHandler:
         self.source_client = None  # Used for receiving
         self.clients = {}          # Used for sending (per destination namespace)
         self.senders = {}          # Cache of senders keyed by (namespace, topic)
-        self.sender_create_locks = defaultdict(asyncio.Lock)
-        self.sender_use_locks = defaultdict(asyncio.Lock)
+        self.batchers: dict[tuple[str, str], ServiceBusHandler._Batcher] = {}
+
+        self.lock_renewer = AutoLockRenewer()
+        self.sender_locks = defaultdict(asyncio.Lock)
         self.rules_by_topic = defaultdict(list)
         self.rules_usage = config.init_rules_usage()
         self.keep_alive_tasks = []
         self.shutdown_event = asyncio.Event()
+        self.dlq_last_warned = defaultdict(lambda: 0)
+        self._sem = asyncio.Semaphore(int(os.getenv('ROUTER_MAX_CONCURRENCY', '50')))
 
         for rule in self.rules:
             self.rules_by_topic[rule.source_topic].append(rule)
@@ -754,9 +732,16 @@ class ServiceBusHandler:
             return
         await asyncio.gather(*(item.close() for item in items), return_exceptions=True)
 
+    async def _process_limited(self, topic_name, message, receiver):
+        async with self._sem:
+            await self.process_message(topic_name, message, receiver)
+
     async def close(self) -> None:
         """Gracefully close all batchers, clients and senders."""
         logger.warning('Closing all connections on shutdown.')
+
+        # Close batchers first (flush buffered messages)
+        await self._close_many(getattr(self, 'batchers', {}).values())
 
         # Close senders and destination clients
         await self._close_many(self.senders.values())
@@ -773,39 +758,30 @@ class ServiceBusHandler:
         if self.source_client:
             await self.source_client.close()
 
-    async def drop_sender(self, namespace: str, topic: str):
-        """Evict a broken sender."""
-        key = (namespace, topic)
-        sender = self.senders.pop(key, None)
-        if sender:
-            with contextlib.suppress(Exception):
-                await sender.close()
-
-    async def get_receiver(self, topic_name: str, subscription_name: str,
-                           is_session_enabled: bool) -> ServiceBusReceiver:
+    async def get_receiver(self, topic_name: str, subscription_name: str) -> ServiceBusReceiver:
         """Get a receiver for a topic/subscription."""
-        if is_session_enabled:
+        if self.is_session_required(topic_name, subscription_name):
             receiver = self.source_client.get_subscription_receiver(
                 topic_name=topic_name,
                 subscription_name=subscription_name,
                 session_id=NEXT_AVAILABLE_SESSION,
-                max_wait_time=1,
+                auto_lock_renewer=self.lock_renewer,
+                max_auto_renew_duration=300,
+                max_wait_time=2,
                 prefetch_count=0
             )
-            sid = getattr(receiver.session, 'session_id', 'unknown')
-            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({sid})')
+            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
         else:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
                 topic_name=topic_name,
                 subscription_name=subscription_name,
-                prefetch_count=self.config.get_prefetch_count(),
-                max_wait_time=1
+                prefetch_count=self.config.get_prefetch_count()
             )
 
         return receiver
 
-    async def get_sender(self, namespace: str, topic: str) -> ServiceBusSender:
+    async def get_sender(self, namespace: str, topic: str):
         """
         Retrieve or create a sender for the given namespace and topic.
 
@@ -818,130 +794,178 @@ class ServiceBusHandler:
         """
         key = (namespace, topic)
 
-        async with self.sender_create_locks[key]:
+        async with self.sender_locks[key]:
             sender = self.senders.get(key)
 
             if sender is not None:
                 return sender
 
+            logger.debug(f'Creating a new sender for {namespace}/{topic}.')
             client = self.clients.get(namespace)
 
             if not client:
                 raise ValueError(f'Namespace "{namespace}" not found in configuration.')
 
             sender = client.get_topic_sender(topic)
-            await sender.__aenter__()
+
+            try:
+                await sender.__aenter__()  # Initialize sender
+            except Exception as e:
+                logger.error(f'Failed to enter sender context for {namespace}/{topic}: {e}')
+                raise
+
             self.senders[key] = sender
             return sender
 
-    async def process_messages(self, source_topic: str, messages: list[ServiceBusReceivedMessage],
-                               receiver: ServiceBusReceiver) -> None:
-        """Process received messages."""
-        batch_parser = BatchParser(self.rules_by_topic[source_topic])
-        parsed = batch_parser.parse(source_topic, messages)
+    def _get_transformer(self) -> Optional[Callable[[ServiceBusMessage, str], ServiceBusMessage]]:
+        """Return the configured synchronous transformer, if any."""
+        return _transformer
 
-        for namespace, topics in parsed.routable_messages.items():
-            for topic, pairs in topics.items():
+    def is_session_required(self, source_topic: str, source_subscription: str) -> bool:
+        """Check if a source topic/subscription requires sessions or not."""
+        for rule in self.rules:
+            if rule.source_topic == source_topic and rule.source_subscription == source_subscription:
+                return rule.session_count > 0
+        return False
 
-                if not pairs:
-                    continue
+    async def keep_source_connection_alive(self, interval=240):
+        """Ping DLQ via peek to check for presence of dead-letter messages."""
+        while not self.shutdown_event.is_set():
+            for topic_name, subscription_name, _, _ in self.input_topics:
+                logger.debug(f'Checking DLQ for {topic_name}/{subscription_name}')
 
-                sender = await self.get_sender(namespace, topic)
-                messages = []
+                try:
+                    async with self.source_client.get_subscription_receiver(
+                        topic_name=topic_name,
+                        subscription_name=subscription_name,
+                        sub_queue='deadletter',
+                        prefetch_count=1
+                    ) as receiver:
+                        msgs = await receiver.peek_messages(max_message_count=1)
+                        current_time = time.time()
+                        key = (topic_name, subscription_name)
 
-                for _, message in pairs:
-                    messages.append(message)
+                        if msgs:
+                            last_warned = self.dlq_last_warned[key]
+
+                            if current_time - last_warned >= 3600:
+                                logger.warning(f'DLQ has messages for {topic_name}/{subscription_name}')
+                                self.dlq_last_warned[key] = current_time
+                except Exception as e:
+                    logger.error(f'Error checking DLQ for {topic_name}/{subscription_name}: {e}')
+
+            await asyncio.sleep(interval)
+
+    @staticmethod
+    def _maybe_parse_json_for_topic(rules_for_topic: list, body: str) -> Optional[dict]:
+        """Parse a JSON message once per topic if any rule needs JSON."""
+        needs_json = any(r.jmespath for r in rules_for_topic)
+        if not needs_json:
+            return None
+        try:
+            return json.loads(body)
+        except json.decoder.JSONDecodeError:
+            return None
+
+    @PROCESSING_TIME.time()
+    async def process_message(self, source_topic: str, message: ServiceBusReceivedMessage,
+                              receiver: ServiceBusReceiver):
+        """
+        Process the received message asynchronously.
+
+        Parameters
+        ----------
+        source_topic : str
+            The name of the topic where the message was received from.
+        message : ServiceBusReceivedMessage
+            The message to be processed.
+        receiver : ServiceBusReceiver
+            The receiver that the message came in on.
+        """
+        message_body = await extract_message_body(message)
+        rules_for_topic = self.rules_by_topic.get(source_topic, [])
+        message_data = self._maybe_parse_json_for_topic(rules_for_topic, message_body)
+
+        for rule in rules_for_topic:
+            is_match, destination_namespaces, destination_topics = rule.is_match(
+                source_topic,
+                message_body,
+                message_data
+            )
+
+            if is_match:
+                try:
+                    logger.debug(f'Successfully matched message to {rule.name()}.')
+                    self.rules_usage[rule.name()].inc()
+                    # Await per-item ack from the batcher before completing the input message
+                    await self.send_message(
+                        destination_namespaces,
+                        destination_topics,
+                        message_body,
+                        message.application_properties,
+                        message.enqueued_time_utc
+                    )
+                    await receiver.complete_message(message)
+                    return
+                except Exception as e:
+                    logger.error(f'Failed to send message ({",".join(destination_namespaces)}): {e}')
+                    await receiver.abandon_message(message)
+                    return
+
+        # No matching rule: Send to DLQ
+        logger.warning(f'No rules match message from {source_topic}, sending to the DLQ.')
+
+        try:
+            await receiver.dead_letter_message(
+                reason='No rules match this message.',
+                error_description='No rules match this message. Please check the message body.',
+                message=message
+            )
+            DLQ_COUNT.inc()
+        except Exception as e:
+            logger.error(f'Failed to send message to DLQ: {e}')
+            await receiver.abandon_message(message)
+
+    async def _receive_loop(self, topic_name: str, receiver: ServiceBusReceiver):
+        """Reduce complexity in receive_and_process."""
+        if receiver.session:
+            async for message in receiver:
+                await self.process_message(topic_name, message, receiver)
+        else:
+            while not self.shutdown_event.is_set():
+                messages = await receiver.receive_messages(
+                    max_message_count=int(os.getenv('MAX_RECEIVER_MESSAGE_COUNT', '100')),
+                    max_wait_time=int(os.getenv('MAX_RECEIVER_MESSAGE_WAIT_TIME', '5'))
+                )
 
                 if not messages:
                     continue
 
-                try:
-                    key = (namespace, topic)
+                await asyncio.gather(*[
+                    self._process_limited(topic_name, message, receiver)
+                    for message in messages
+                ])
 
-                    async with self.sender_use_locks[key]:
-                        await self.send_messages(sender, messages)
-                except (ServiceBusConnectionError, ServiceBusError):
-                    await self.drop_sender(namespace, topic)
-                    raise
-
-        await self.settle_outcome(receiver, parsed)
-
-    async def receive_and_process(self, topic_name, subscription_name, session_enabled: bool = False):
+    async def receive_and_process(self, topic_name, subscription_name):
         """Receive messages, process them, and forward."""
         if not self.source_client:
-            logger.error('Source client is not initialized')
+            logger.error('Source client is not initialized, cannot receive messages.')
             return
-
-        max_message_count = int(os.environ.get('ROUTER_BATCH_MAX_MESSAGES', '100'))
-        max_wait_time = 5
-
-        if session_enabled:
-            max_message_count = int(os.environ.get('ROUTER_SESSION_MAX_MESSAGES', '25'))
-            max_message_count = max(max_message_count, 25)
-            max_wait_time = 1
 
         while not self.shutdown_event.is_set():
             try:
-                async with await self.get_receiver(
-                    topic_name, subscription_name, session_enabled
-                ) as receiver:
-                    renewer = None
-
-                    try:
-                        if session_enabled and receiver.session:
-                            renewer = AutoLockRenewer(max_lock_renewal_duration=300)
-                            renewer.register(receiver, receiver.session)
-
-                        while not self.shutdown_event.is_set():
-                            try:
-                                messages = await receiver.receive_messages(
-                                    max_message_count=max_message_count,
-                                    max_wait_time=max_wait_time
-                                )
-                            except OperationTimeoutError:
-                                continue
-
-                            if not messages:
-                                continue
-
-                            await self.process_messages(topic_name, messages, receiver)
-
-                    finally:
-                        if renewer:
-                            await renewer.close()
-
-            except OperationTimeoutError:
-                logger.debug(
-                    f'Receiver timeout on {topic_name}/{subscription_name}, recreating receiver'
-                )
-                continue
-
-            except SessionLockLostError:
-                logger.info(
-                    f'Session lock lost on {topic_name}/{subscription_name}, reacquiring session'
-                )
-                continue
-
-            except (ServiceBusError, ServiceBusConnectionError) as e:
-                logger.info(
-                    f'Service Bus connection dropped on {topic_name}/{subscription_name}, reconnecting: {e}'
-                )
-                await asyncio.sleep(2)
-                continue
-
+                async with await self.get_receiver(topic_name, subscription_name) as receiver:
+                    await self._receive_loop(topic_name, receiver)
             except asyncio.CancelledError:
-                raise
-
-            except Exception:
-                logger.exception(
-                    f'Unexpected receiver error on {topic_name}/{subscription_name}'
-                )
-                await asyncio.sleep(5)
+                break
+            except OperationTimeoutError:
+                logger.debug(f'Timed out on {topic_name}/{subscription_name}.')
+            except Exception as e:
+                logger.error(f'Unknown exception {e} on {topic_name}/{subscription_name}.')
 
     async def run(self):
         """Start all receivers."""
         receive_tasks = []
-        await self.wait_for_amqp_ready()
 
         for topic, subscription, session_count in self.input_topics:
             session_enabled = session_count > 0
@@ -951,63 +975,92 @@ class ServiceBusHandler:
                 receive_tasks.append(task)
             else:
                 for _ in range(0, session_count):
-                    task = asyncio.create_task(self.receive_and_process(topic, subscription, session_enabled))
+                    task = asyncio.create_task(self.receive_and_process(topic, subscription))
                     receive_tasks.append(task)
 
         await asyncio.gather(*receive_tasks)
 
-    async def send_messages(self, sender: ServiceBusSender, messages: list[ServiceBusMessage]):
-        """Send a list of messages to the provided sender."""
-        if not messages:
-                return
+    def _get_batcher(self, namespace: str, topic: str) -> 'ServiceBusHandler._Batcher':
+        key = (namespace, topic)
+        if key not in self.batchers:
+            async def factory():
+                return await self.get_sender(namespace, topic)
+            self.batchers[key] = ServiceBusHandler._Batcher(
+                sender_factory=factory,
+                max_wait_ms=self._BATCH_MAX_WAIT_MS,
+                max_msgs=self._BATCH_MAX_MESSAGES,
+                topic_name=topic,
+            )
+        return self.batchers[key]
 
-        batch = await sender.create_message_batch()
+    def _build_message(self, body: str, application_properties: dict, topic_name: str) -> ServiceBusMessage:
+        """
+        Construct a ServiceBusMessage and apply the optional synchronous transformer.
 
-        for message in messages:
+        Parameters
+        ----------
+        body : str
+            The body of the new message.
+        application_properties | dict
+            The headers for the message.
+        topic_name : str
+            The topic to which the message is to be sent.
+
+        Returns
+        -------
+        ServiceBusMessage
+            The message to be sent.
+        """
+        if self.ts_app_prop_name:
+            ts = datetime.datetime.now(datetime.UTC).isoformat(timespec='milliseconds').replace('+00:00', 'Z')
+            logger.debug(f'Setting application property "{self.ts_app_prop_name}" to "{ts}".')
+            application_properties[self.ts_app_prop_name] = ts
+
+        msg = ServiceBusMessage(body=body, application_properties=application_properties)
+        transformer = self._get_transformer()
+
+        if transformer:
             try:
-                batch.add_message(message)
-                continue
-            except ValueError:
-                # Current batch is full OR message too large
-                pass
+                out = transformer(msg, topic_name, logger)
+                if isinstance(out, ServiceBusMessage):
+                    return out
+            except Exception as e:
+                logger.error(f'Custom transformer raised an exception: {e}')
 
-            # Flush current batch if it has data
-            if len(batch) > 0:
-                await sender.send_messages(batch)
+        return msg
 
-            # Start a new batch
-            batch = await sender.create_message_batch()
+    async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict,
+                           src_enqueued_time_utc: datetime.datetime):
+        """
+        Send a message to the correct namespace and topic (batched by default).
 
-            try:
-                batch.add_message(message)
-            except ValueError:
-                # Message is too large to fit even in an empty batch
-                # Send it individually (this is required by the SDK contract)
-                await sender.send_messages(message)
+        Parameters
+        ----------
+        namespaces : list[str]
+            The namespaces this message should be sent to.
+        topics : list[str]
+            The topics this message should be sent to.
+        message_body : str
+            The body of the message to be sent.
+        application_properties : dict
+            The application properties of the original message.
+        src_enqueued_time_utc : datetime
+            The timestamp of when the message was enqueued on the source namespace.
+        """
+        # enqueue on each relevant destination batcher and await per-item flush
+        timestamp = src_enqueued_time_utc.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
-        # Final flush (only if batch has data)
-        if len(batch) > 0:
-            await sender.send_messages(batch)
+        if application_properties:
+            application_properties['__src_enqueued_time_utc'] = timestamp
+        else:
+            application_properties = {'__src_enqueued_time_utc': timestamp}
 
-    async def settle_outcome(self, receiver: ServiceBusReceiver, outcome: BatchParseOutcome):
-        """Complete routed messages and dead-letter non-routed."""
-        for action, msg in outcome.settlement_plan:
-            try:
-                if action == 'deadletter':
-                    await receiver.dead_letter_message(
-                        msg,
-                        reason='NoRuleMatch',
-                        error_description='No rules match this message. Please check the message body.'
-                    )
-                else:
-                    await receiver.complete_message(msg)
-            except IGNORABLE_SETTLEMENT_EXCEPTIONS:
-                continue
-            except ServiceBusConnectionError:
-                raise
-            except ServiceBusError:
-                logger.exception(f'Fatal error during settlement action={action}.')
-                raise
+        await asyncio.gather(*[
+            self._get_batcher(ns, topics[idx]).add_and_wait(
+                self._build_message(message_body, application_properties, topics[idx])
+            )
+            for idx, ns in enumerate(namespaces)
+        ])
 
     async def start(self):
         """Initialize Service Bus client for receiving and clients for sending."""
@@ -1018,66 +1071,34 @@ class ServiceBusHandler:
             logger.debug(f'Creating connection for destination namespace: {namespace}.')
             self.clients[namespace] = ServiceBusClient.from_connection_string(conn_str)
 
-    async def wait_for_amqp_ready(self, timeout=30):
-        """Test that AMQP/ServiceBus is actually ready."""
-        start = time.time()
-        topic_name, subscription_name, _ = self.input_topics[0]
-
-        while True:
-            if time.time() - start > timeout:
-                logger.error('AMQP did not become ready within timeout; continuing anyway.')
-                return
-
-            try:
-                async with self.source_client.get_subscription_receiver(
-                    topic_name=topic_name,
-                    subscription_name=subscription_name,
-                    sub_queue='deadletter',
-                    prefetch_count=1
-                ) as receiver:
-                    await receiver.peek_messages(max_message_count=1)
-
-                logger.info('AMQP management link is ready.')
-                return
-
-            except Exception as e:
-                logger.warning(f'Waiting for AMQP readiness: {e}')
-                await asyncio.sleep(1)
+        self.keep_alive_tasks.append(asyncio.create_task(self.keep_source_connection_alive()))
 
 
-async def main(config: EnvironmentConfigParser):
-    """Configure and run the Service Bus handler with graceful shutdown."""
-    handler = ServiceBusHandler(config)
-    await handler.start()
-
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    def shutdown():
-        logger.warning('Shutdown signal received...')
-        handler.shutdown_event.set()
-        stop_event.set()
-
-    loop.add_signal_handler(signal.SIGTERM, shutdown)
-    loop.add_signal_handler(signal.SIGINT, shutdown)
-
-    run_task = asyncio.create_task(handler.run())
+async def main():
+    """Configure the handler."""
+    handler = ServiceBusHandler(EnvironmentConfigParser())
 
     try:
-        await stop_event.wait()
+        await handler.start()
+        loop = asyncio.get_running_loop()
+        stop_event = asyncio.Event()
+
+        def shutdown():
+            logger.warning('Shutdown signal received. Cleaning up...')
+            stop_event.set()
+
+        loop.add_signal_handler(signal.SIGTERM, shutdown)
+        loop.add_signal_handler(signal.SIGINT, shutdown)  # Handle CTRL+C
+
+        await handler.run()      # Start processing messages
+        await stop_event.wait()  # Wait for shutdown signal
+
     finally:
-        logger.warning('Waiting for router task to finish...')
-        run_task.cancel()
-
-        with contextlib.suppress(asyncio.CancelledError):
-            await run_task
-
-        await handler.close()
-        logger.warning('Shutdown complete.')
+        await handler.close()    # Ensure all connections are properly closed
 
 
 if __name__ == '__main__':
     logger.info(f'Starting version "{__version__}".')
     config = EnvironmentConfigParser()
     start_http_server(config.get_prometheus_port())
-    asyncio.run(main(config))
+    asyncio.run(main())
