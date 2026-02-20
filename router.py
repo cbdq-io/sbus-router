@@ -6,7 +6,7 @@ LICENCE
 -------
 BSD 3-Clause License
 
-Copyright (c) 2024,2025, Cloud Based DQ Ltd.
+Copyright (c) 2024 - 2026, Cloud Based DQ Ltd.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -54,12 +54,13 @@ import jsonschema
 import jsonschema.exceptions
 from azure.servicebus import (NEXT_AVAILABLE_SESSION, ServiceBusMessage,
                               ServiceBusReceivedMessage)
-from azure.servicebus.aio import ServiceBusClient, ServiceBusReceiver
+from azure.servicebus.aio import (AutoLockRenewer, ServiceBusClient,
+                                  ServiceBusReceiver)
 from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '1.0.0'
+__version__ = '2.0.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 
@@ -173,15 +174,18 @@ class RouterRule:
         The destination topics for the messages matching this rule.
     jmespath : str
         A JMESPath string for checking against a JSON payload.
+    max_auto_renew_duration : int
+        The time in seconds to allow messags for this topic to be locked for (default: 300).
     regexp : str
         A regular expression for comparing against the message.
     source_topic : str
         The name of the source topic that makes up some of the matching criteria for the rule.
-    max_tasks : int
-        The number of tasks to allocated when consuming from the rule.
+    session_count : int
+        The number of sessions on the subscription.  Defaults to zero which
+        indicates that the subscription is not session enabled.
     """
 
-    def __init__(self, name: str, definition: str, max_tasks: int) -> None:
+    def __init__(self, name: str, definition: str) -> None:
         self.definition = definition
         self.name(name)
         parsed_definition = self.parse_definition(definition)
@@ -196,7 +200,7 @@ class RouterRule:
         else:
             self.destination_topics = []
 
-        self.is_session_required = parsed_definition.get('is_session_required', False)
+        self.session_count = parsed_definition.get('session_count', 0)
         self.jmespath = parsed_definition.get('jmespath', None)
 
         if self.jmespath:
@@ -204,10 +208,6 @@ class RouterRule:
         else:
             self.jmespath_expr = None
 
-        if 'max_auto_renew_duration' in parsed_definition:
-            logger.warning('max_auto_renew_duration is now deprecated and ignored.')
-
-        self.max_tasks = parsed_definition.get('max_tasks', max_tasks)
         self.regexp = parsed_definition.get('regexp', None)
 
         if self.regexp:
@@ -441,10 +441,6 @@ class EnvironmentConfigParser:
     def __init__(self, environ: dict = dict(os.environ)) -> None:
         self._environ = environ
 
-    def get_disable_lock_renewal(self) -> bool:
-        """Check if lock renewal is to be disabled."""
-        return self._environ.get('ROUTER_DISABLE_LOCK_RENEWAL', '0').lower() in ('1', 'true', 'yes')
-
     def get_prefetch_count(self) -> int:
         """
         Get the number of messages to be prefetched by the client.
@@ -452,7 +448,7 @@ class EnvironmentConfigParser:
         Returns
         -------
         int
-            The number of messages to be prefetched. If not provided, default is 100.
+            The number of messages to be prefetched. If not provided, default is 300.
         """
         return int(self._environ.get('ROUTER_PREFETCH_COUNT', '100'))
 
@@ -505,7 +501,7 @@ class EnvironmentConfigParser:
             name = item[0].replace('ROUTER_RULE_', '')
             template = Template(item[1])
             definition = template.safe_substitute(os.environ)
-            response.append(RouterRule(name, definition, self.max_tasks()))
+            response.append(RouterRule(name, definition))
 
         return response
 
@@ -535,10 +531,6 @@ class EnvironmentConfigParser:
                 f'How often the {rule.name()} rule has been matched.'
             )
         return response
-
-    def max_tasks(self) -> int:
-        """Get the max number of tasks per source subscription."""
-        return int(self._environ.get('ROUTER_MAX_TASKS', '1'))
 
     def service_bus_namespaces(self) -> ServiceBusNamespaces:
         """
@@ -578,13 +570,13 @@ class EnvironmentConfigParser:
         Returns
         -------
         list[tuple]
-            A list of tuples (topic_name, subscription_name).
+            A list of tuples (topic_name, subscription_name, session_count).
         """
         response = []
         rules = self.get_rules()
 
         for rule in rules:
-            instance = (rule.source_topic, rule.source_subscription, rule.max_tasks)
+            instance = (rule.source_topic, rule.source_subscription, rule.session_count)
 
             if instance not in response:
                 response.append(instance)
@@ -713,10 +705,7 @@ class ServiceBusHandler:
         self.namespaces = config.service_bus_namespaces().get_all_namespaces()  # For sending
         self.input_topics = config.topics_and_subscriptions()
         self.rules = config.get_rules()
-        self.max_tasks = config.max_tasks()
         self.ts_app_prop_name = config.get_ts_app_prop_name()
-        logger.info(f'Starting by default {self.max_tasks} task(s) per subscription.')
-        self.disable_lock_renewal = config.get_disable_lock_renewal()
 
         for idx, rule in enumerate(self.rules):
             logger.info(f'Rule parsing order {idx} {rule.name()}')
@@ -725,12 +714,15 @@ class ServiceBusHandler:
         self.clients = {}          # Used for sending (per destination namespace)
         self.senders = {}          # Cache of senders keyed by (namespace, topic)
         self.batchers: dict[tuple[str, str], ServiceBusHandler._Batcher] = {}
+
+        self.lock_renewer = AutoLockRenewer()
         self.sender_locks = defaultdict(asyncio.Lock)
         self.rules_by_topic = defaultdict(list)
         self.rules_usage = config.init_rules_usage()
         self.keep_alive_tasks = []
         self.shutdown_event = asyncio.Event()
         self.dlq_last_warned = defaultdict(lambda: 0)
+        self._sem = asyncio.Semaphore(int(os.getenv('ROUTER_MAX_CONCURRENCY', '50')))
 
         for rule in self.rules:
             self.rules_by_topic[rule.source_topic].append(rule)
@@ -739,6 +731,10 @@ class ServiceBusHandler:
         if not items:
             return
         await asyncio.gather(*(item.close() for item in items), return_exceptions=True)
+
+    async def _process_limited(self, topic_name, message, receiver):
+        async with self._sem:
+            await self.process_message(topic_name, message, receiver)
 
     async def close(self) -> None:
         """Gracefully close all batchers, clients and senders."""
@@ -769,18 +765,18 @@ class ServiceBusHandler:
                 topic_name=topic_name,
                 subscription_name=subscription_name,
                 session_id=NEXT_AVAILABLE_SESSION,
-                max_wait_time=5,
+                auto_lock_renewer=self.lock_renewer,
+                max_auto_renew_duration=300,
+                max_wait_time=2,
                 prefetch_count=0
             )
-            sid = getattr(receiver.session, 'session_id', 'unknown')
-            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({sid})')
+            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
         else:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
                 topic_name=topic_name,
                 subscription_name=subscription_name,
-                prefetch_count=self.config.get_prefetch_count(),
-                max_wait_time=1
+                prefetch_count=self.config.get_prefetch_count()
             )
 
         return receiver
@@ -829,13 +825,13 @@ class ServiceBusHandler:
         """Check if a source topic/subscription requires sessions or not."""
         for rule in self.rules:
             if rule.source_topic == source_topic and rule.source_subscription == source_subscription:
-                return rule.is_session_required
+                return rule.session_count > 0
         return False
 
     async def keep_source_connection_alive(self, interval=240):
         """Ping DLQ via peek to check for presence of dead-letter messages."""
         while not self.shutdown_event.is_set():
-            for topic_name, subscription_name, _ in self.input_topics:
+            for topic_name, subscription_name, _, _ in self.input_topics:
                 logger.debug(f'Checking DLQ for {topic_name}/{subscription_name}')
 
                 try:
@@ -886,13 +882,9 @@ class ServiceBusHandler:
         receiver : ServiceBusReceiver
             The receiver that the message came in on.
         """
-        renew_task = None
         message_body = await extract_message_body(message)
         rules_for_topic = self.rules_by_topic.get(source_topic, [])
         message_data = self._maybe_parse_json_for_topic(rules_for_topic, message_body)
-
-        if receiver.session is None and not self.disable_lock_renewal:
-            renew_task = asyncio.create_task(self._renew_message_lock(receiver, message))
 
         for rule in rules_for_topic:
             is_match, destination_namespaces, destination_topics = rule.is_match(
@@ -913,15 +905,12 @@ class ServiceBusHandler:
                         message.application_properties,
                         message.enqueued_time_utc
                     )
-                    await self.safe_complete(receiver, message)
+                    await receiver.complete_message(message)
                     return
                 except Exception as e:
                     logger.error(f'Failed to send message ({",".join(destination_namespaces)}): {e}')
-                    await self.safe_abandon(receiver, message)
+                    await receiver.abandon_message(message)
                     return
-                finally:
-                    if renew_task:
-                        renew_task.cancel()
 
         # No matching rule: Send to DLQ
         logger.warning(f'No rules match message from {source_topic}, sending to the DLQ.')
@@ -935,26 +924,27 @@ class ServiceBusHandler:
             DLQ_COUNT.inc()
         except Exception as e:
             logger.error(f'Failed to send message to DLQ: {e}')
-            await self.safe_abandon(receiver, message)
-        finally:
-            if renew_task:
-                renew_task.cancel()
+            await receiver.abandon_message(message)
 
-    async def _receive_loop(self, topic_name, subscription_name, receiver):
-        """Receive in small batches instead of relying on the async iterator."""
-        while not self.shutdown_event.is_set():
-            # Tune these two numbers if needed
-            messages = await receiver.receive_messages(
-                max_message_count=int(os.getenv('MAX_RECEIVER_MESSAGE_COUNT', '50')),
-                max_wait_time=int(os.getenv('MAX_RECEIVER_MESSAGE_WAIT_TIME', '1'))
-            )
-
-            if not messages:
-                # Nothing available right now; loop again
-                continue
-
-            for message in messages:
+    async def _receive_loop(self, topic_name: str, receiver: ServiceBusReceiver):
+        """Reduce complexity in receive_and_process."""
+        if receiver.session:
+            async for message in receiver:
                 await self.process_message(topic_name, message, receiver)
+        else:
+            while not self.shutdown_event.is_set():
+                messages = await receiver.receive_messages(
+                    max_message_count=int(os.getenv('MAX_RECEIVER_MESSAGE_COUNT', '100')),
+                    max_wait_time=int(os.getenv('MAX_RECEIVER_MESSAGE_WAIT_TIME', '5'))
+                )
+
+                if not messages:
+                    continue
+
+                await asyncio.gather(*[
+                    self._process_limited(topic_name, message, receiver)
+                    for message in messages
+                ])
 
     async def receive_and_process(self, topic_name, subscription_name):
         """Receive messages, process them, and forward."""
@@ -962,19 +952,10 @@ class ServiceBusHandler:
             logger.error('Source client is not initialized, cannot receive messages.')
             return
 
-        while True:
+        while not self.shutdown_event.is_set():
             try:
                 async with await self.get_receiver(topic_name, subscription_name) as receiver:
-                    renew_task = None
-
-                    if receiver.session is not None and not self.disable_lock_renewal:
-                        renew_task = asyncio.create_task(self._renew_session_lock(receiver))
-
-                    try:
-                        await self._receive_loop(topic_name, subscription_name, receiver)
-                    finally:
-                        if renew_task:
-                            renew_task.cancel()
+                    await self._receive_loop(topic_name, receiver)
             except asyncio.CancelledError:
                 break
             except OperationTimeoutError:
@@ -985,37 +966,19 @@ class ServiceBusHandler:
     async def run(self):
         """Start all receivers."""
         receive_tasks = []
-        await self.wait_for_amqp_ready()
 
-        for topic, subscription, max_tasks in self.input_topics:
-            logger.debug(f'Creating {max_tasks} tasks for {topic}/{subscription}')
+        for topic, subscription, session_count in self.input_topics:
+            session_enabled = session_count > 0
 
-            for _ in range(0, max_tasks):
+            if not session_enabled:
                 task = asyncio.create_task(self.receive_and_process(topic, subscription))
                 receive_tasks.append(task)
+            else:
+                for _ in range(0, session_count):
+                    task = asyncio.create_task(self.receive_and_process(topic, subscription))
+                    receive_tasks.append(task)
 
         await asyncio.gather(*receive_tasks)
-
-    async def _renew_message_lock(self, receiver: ServiceBusReceiver, message: ServiceBusReceivedMessage):
-        """Renew message locks for non-sessioned receivers."""
-        while not self.shutdown_event.is_set():
-            try:
-                await receiver.renew_message_lock(message)
-            except Exception as e:
-                logger.error(f'Message lock renewal failed: {e}')
-                return
-            await asyncio.sleep(10)
-
-    async def _renew_session_lock(self, receiver: ServiceBusReceiver):
-        """Renew session locks."""
-        while not self.shutdown_event.is_set():
-            try:
-                await receiver.session.renew_lock()
-            except Exception as e:
-                message = f'Session lock renewal failed on {receiver.session.session_id}'
-                logger.error(f'{message}: {e}')
-                return
-            await asyncio.sleep(10)
 
     def _get_batcher(self, namespace: str, topic: str) -> 'ServiceBusHandler._Batcher':
         key = (namespace, topic)
@@ -1066,33 +1029,6 @@ class ServiceBusHandler:
 
         return msg
 
-    async def safe_abandon(self, receiver: ServiceBusReceiver, message: ServiceBusMessage) -> bool:
-        """Catch and retry when attempting to abandon messages."""
-        for attempt in range(3):
-            try:
-                await receiver.abandon_message(message)
-                return True
-            except Exception as e:
-                logger.error(f'Abandon failed (attempt {attempt}): {e}')
-                await asyncio.sleep(0.25)
-
-        return False
-
-    async def safe_complete(self, receiver: ServiceBusReceiver, message: ServiceBusMessage) -> bool:
-        """Catch and retry when attempting to complete messages."""
-        attempts = 3
-
-        for attempt in range(attempts):
-            try:
-                await receiver.complete_message(message)
-                return True
-            except Exception as e:
-                logger.info(f'Complete failed (attempt {attempt + 1}): {e}')
-                await asyncio.sleep(0.25)
-
-        logger.error(f'COMPLETE FAILED after {attempts} retries.')
-        return False
-
     async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict,
                            src_enqueued_time_utc: datetime.datetime):
         """
@@ -1112,7 +1048,7 @@ class ServiceBusHandler:
             The timestamp of when the message was enqueued on the source namespace.
         """
         # enqueue on each relevant destination batcher and await per-item flush
-        timestamp = src_enqueued_time_utc.isoformat(timespec='milliseconds') + 'Z'
+        timestamp = src_enqueued_time_utc.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
 
         if application_properties:
             application_properties['__src_enqueued_time_utc'] = timestamp
@@ -1136,32 +1072,6 @@ class ServiceBusHandler:
             self.clients[namespace] = ServiceBusClient.from_connection_string(conn_str)
 
         self.keep_alive_tasks.append(asyncio.create_task(self.keep_source_connection_alive()))
-
-    async def wait_for_amqp_ready(self, timeout=30):
-        """Test that AMQP/ServiceBus is actually ready."""
-        start = time.time()
-        topic_name, subscription_name, _ = self.input_topics[0]
-
-        while True:
-            if time.time() - start > timeout:
-                logger.error('AMQP did not become ready within timeout; continuing anyway.')
-                return
-
-            try:
-                async with self.source_client.get_subscription_receiver(
-                    topic_name=topic_name,
-                    subscription_name=subscription_name,
-                    sub_queue='deadletter',
-                    prefetch_count=1
-                ) as receiver:
-                    await receiver.peek_messages(max_message_count=1)
-
-                logger.info('AMQP management link is ready.')
-                return
-
-            except Exception as e:
-                logger.warning(f'Waiting for AMQP readiness: {e}')
-                await asyncio.sleep(1)
 
 
 async def main():

@@ -3,6 +3,23 @@
 
 ## Unreleased
 
+### Features
+
+* Replace is_session_required with session_count and remove max_auto_renew_duration and max_tasks from the rule definitions. [Ben Dalling]
+
+### Fix
+
+* Handle receivers differently depending on if sessions are enabled or not. [Ben Dalling]
+
+* Correct edge case when first message is unable to be added to a batch. [Ben Dalling]
+
+* Refactor how batching is handled. [Ben Dalling]
+
+* A more graceful shutdown of the handler. [Ben Dalling]
+
+
+## 1.0.0 (2025-12-11)
+
 ### Fix
 
 * Optionally disable lock renewal. [Ben Dalling]

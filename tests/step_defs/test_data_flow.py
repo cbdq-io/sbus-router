@@ -60,10 +60,10 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
     none_destination_topics = ['N/A', 'DLQ']
 
     if output_topic in none_destination_topics:
-        client = ServiceBusClient.from_connection_string(connection_string)
-        sender = client.get_topic_sender(input_topic)
-        sender.send_messages(ServiceBusMessage(body=message_body, session_id='0'))
-        pytest.skip(f'Output topic is "{output_topic}".')
+        with ServiceBusClient.from_connection_string(connection_string) as client:
+            with client.get_topic_sender(input_topic) as sender:
+                sender.send_messages(ServiceBusMessage(body=message_body, session_id='0'))
+                pytest.skip(f'Output topic is "{output_topic}".')
 
 
 @then('the DLQ count is 2')
@@ -87,7 +87,7 @@ def _(connection_string: str):
     assert deleted_messages == 1
 
 
-def is_message_valid(message: ServiceBusMessage, expected_body: str, topic_name: str) -> bool:
+def is_message_valid(message: ServiceBusMessage, expected_body: str) -> bool:
     """
     Check the validity of the received message.
 
@@ -143,11 +143,11 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
             receiver = client.get_subscription_receiver(
                 output_topic,
                 'test',
-                max_wait_time=5,
+                max_wait_time=1,
                 session_id='0'
             )
         else:
-            receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=5)
+            receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=1)
 
         for message in receiver:
             logger.debug(f'Message received: "{str(message.body)}" of type "{message.body_type}".')
@@ -157,6 +157,6 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
         receiver.close()
         client.close()
         assert message_received, f'Message not received within the retry limit from "{output_topic}".'
-        assert is_message_valid(message, message_body, output_topic)
+        assert is_message_valid(message, message_body)
         is_application_propery_present(message, '__routed_at')
         is_application_propery_present(message, '__src_enqueued_time_utc')
