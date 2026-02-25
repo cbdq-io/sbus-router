@@ -28,7 +28,8 @@
 	"customizations": {
 		"vscode": {
 			"extensions": [
-				"alexkrechik.cucumberautocomplete"
+				"alexkrechik.cucumberautocomplete",
+				"njpwerner.autodocstring"
 			]
 		}
 	}
