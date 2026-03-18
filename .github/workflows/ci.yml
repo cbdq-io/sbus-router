@@ -49,9 +49,12 @@ jobs:
       - name: Test
         run: make test
 
+      - name: Rebuild Image for Trivy
+        run: docker build -t router:${{ github.sha }} .
+
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@0.34.0
         with:
-          image-ref: router:latest
+          image-ref: router:${{ github.sha }}
           scanners: vuln
           trivy-config: trivy.yaml
