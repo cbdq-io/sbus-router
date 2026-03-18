@@ -4,7 +4,8 @@ import time
 
 import pytest
 import testinfra
-from azure.servicebus import ServiceBusClient, ServiceBusMessage
+from azure.servicebus import (NEXT_AVAILABLE_SESSION, ServiceBusClient,
+                              ServiceBusMessage)
 from azure.servicebus.amqp import AmqpMessageBodyType
 from pytest_bdd import given, parsers, scenario, then, when
 
@@ -62,7 +63,7 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
     if output_topic in none_destination_topics:
         with ServiceBusClient.from_connection_string(connection_string) as client:
             with client.get_topic_sender(input_topic) as sender:
-                sender.send_messages(ServiceBusMessage(body=message_body, session_id='0'))
+                sender.send_messages(ServiceBusMessage(body=message_body, session_id='42'))
                 pytest.skip(f'Output topic is "{output_topic}".')
 
 
@@ -134,7 +135,7 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
     client = ServiceBusClient.from_connection_string(connection_string)
     sender = client.get_topic_sender(input_topic)
     logger.debug(f'Sending message "{message_body}" to "{input_topic}" at {time.time()}.')
-    sender.send_messages(ServiceBusMessage(body=message_body, session_id='0'))
+    sender.send_messages(ServiceBusMessage(body=message_body, session_id='42'))
     sender.close()
     message_received = False
 
@@ -143,8 +144,8 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
             receiver = client.get_subscription_receiver(
                 output_topic,
                 'test',
-                max_wait_time=1,
-                session_id='0'
+                max_wait_time=5,
+                session_id=NEXT_AVAILABLE_SESSION
             )
         else:
             receiver = client.get_subscription_receiver(output_topic, 'test', max_wait_time=1)

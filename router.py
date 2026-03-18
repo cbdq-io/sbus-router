@@ -63,6 +63,11 @@ from prometheus_client import Counter, Summary, start_http_server
 __version__ = '2.0.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
+SESSION_RECEIVER_CREATED = Counter(
+    'sb_session_receiver_created_total',
+    'Number of session receivers created',
+    ['topic', 'subscription']
+)
 
 
 def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> logging.Logger:
@@ -188,6 +193,7 @@ class RouterRule:
     def __init__(self, name: str, definition: str) -> None:
         self.definition = definition
         self.name(name)
+        self.session_ids = []
         parsed_definition = self.parse_definition(definition)
 
         if parsed_definition['destination_namespaces']:
@@ -201,6 +207,16 @@ class RouterRule:
             self.destination_topics = []
 
         self.session_count = parsed_definition.get('session_count', 0)
+
+        if parsed_definition.get('session_ids'):
+            for session_id in parsed_definition['session_ids'].split(','):
+                self.session_ids.append(session_id.strip())
+
+            self.session_count = len(self.session_ids)
+        elif self.session_count > 0:
+            for _ in range(self.session_count):
+                self.session_ids.append(NEXT_AVAILABLE_SESSION)
+
         self.jmespath = parsed_definition.get('jmespath', None)
 
         if self.jmespath:
@@ -570,13 +586,17 @@ class EnvironmentConfigParser:
         Returns
         -------
         list[tuple]
-            A list of tuples (topic_name, subscription_name, session_count).
+            A list of tuples (topic_name, subscription_name, session_ids).
         """
         response = []
         rules = self.get_rules()
 
         for rule in rules:
-            instance = (rule.source_topic, rule.source_subscription, rule.session_count)
+            instance = (
+                rule.source_topic,
+                rule.source_subscription,
+                tuple(rule.session_ids)
+            )
 
             if instance not in response:
                 response.append(instance)
@@ -758,19 +778,19 @@ class ServiceBusHandler:
         if self.source_client:
             await self.source_client.close()
 
-    async def get_receiver(self, topic_name: str, subscription_name: str) -> ServiceBusReceiver:
+    async def get_receiver(self, topic_name: str, subscription_name: str, session_id: str = None) -> ServiceBusReceiver:
         """Get a receiver for a topic/subscription."""
-        if self.is_session_required(topic_name, subscription_name):
+        if session_id is not None:
             receiver = self.source_client.get_subscription_receiver(
                 topic_name=topic_name,
                 subscription_name=subscription_name,
-                session_id=NEXT_AVAILABLE_SESSION,
+                session_id=session_id,
                 auto_lock_renewer=self.lock_renewer,
                 max_auto_renew_duration=300,
-                max_wait_time=2,
                 prefetch_count=0
             )
-            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
+            logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({session_id})')
+            SESSION_RECEIVER_CREATED.labels(topic_name, subscription_name).inc()
         else:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
@@ -831,7 +851,7 @@ class ServiceBusHandler:
     async def keep_source_connection_alive(self, interval=240):
         """Ping DLQ via peek to check for presence of dead-letter messages."""
         while not self.shutdown_event.is_set():
-            for topic_name, subscription_name, _, _ in self.input_topics:
+            for topic_name, subscription_name, _ in self.input_topics:
                 logger.debug(f'Checking DLQ for {topic_name}/{subscription_name}')
 
                 try:
@@ -897,13 +917,15 @@ class ServiceBusHandler:
                 try:
                     logger.debug(f'Successfully matched message to {rule.name()}.')
                     self.rules_usage[rule.name()].inc()
+                    out_session_id = receiver.session.session_id if receiver.session else None
                     # Await per-item ack from the batcher before completing the input message
                     await self.send_message(
                         destination_namespaces,
                         destination_topics,
                         message_body,
                         message.application_properties,
-                        message.enqueued_time_utc
+                        message.enqueued_time_utc,
+                        out_session_id
                     )
                     await receiver.complete_message(message)
                     return
@@ -926,9 +948,9 @@ class ServiceBusHandler:
             logger.error(f'Failed to send message to DLQ: {e}')
             await receiver.abandon_message(message)
 
-    async def _receive_loop(self, topic_name: str, receiver: ServiceBusReceiver):
+    async def _receive_loop(self, topic_name: str, receiver: ServiceBusReceiver, session_id: str = None):
         """Reduce complexity in receive_and_process."""
-        if receiver.session:
+        if session_id is not None:
             async for message in receiver:
                 await self.process_message(topic_name, message, receiver)
         else:
@@ -946,7 +968,7 @@ class ServiceBusHandler:
                     for message in messages
                 ])
 
-    async def receive_and_process(self, topic_name, subscription_name):
+    async def receive_and_process(self, topic_name, subscription_name, session_id: str = None):
         """Receive messages, process them, and forward."""
         if not self.source_client:
             logger.error('Source client is not initialized, cannot receive messages.')
@@ -954,8 +976,8 @@ class ServiceBusHandler:
 
         while not self.shutdown_event.is_set():
             try:
-                async with await self.get_receiver(topic_name, subscription_name) as receiver:
-                    await self._receive_loop(topic_name, receiver)
+                async with await self.get_receiver(topic_name, subscription_name, session_id) as receiver:
+                    await self._receive_loop(topic_name, receiver, session_id)
             except asyncio.CancelledError:
                 break
             except OperationTimeoutError:
@@ -967,15 +989,15 @@ class ServiceBusHandler:
         """Start all receivers."""
         receive_tasks = []
 
-        for topic, subscription, session_count in self.input_topics:
-            session_enabled = session_count > 0
+        for topic, subscription, session_ids in self.input_topics:
+            session_enabled = len(session_ids) > 0
 
             if not session_enabled:
                 task = asyncio.create_task(self.receive_and_process(topic, subscription))
                 receive_tasks.append(task)
             else:
-                for _ in range(0, session_count):
-                    task = asyncio.create_task(self.receive_and_process(topic, subscription))
+                for session_id in session_ids:
+                    task = asyncio.create_task(self.receive_and_process(topic, subscription, session_id))
                     receive_tasks.append(task)
 
         await asyncio.gather(*receive_tasks)
@@ -993,7 +1015,8 @@ class ServiceBusHandler:
             )
         return self.batchers[key]
 
-    def _build_message(self, body: str, application_properties: dict, topic_name: str) -> ServiceBusMessage:
+    def _build_message(self, body: str, application_properties: dict, topic_name: str,
+                       session_id: str = None) -> ServiceBusMessage:
         """
         Construct a ServiceBusMessage and apply the optional synchronous transformer.
 
@@ -1016,7 +1039,7 @@ class ServiceBusHandler:
             logger.debug(f'Setting application property "{self.ts_app_prop_name}" to "{ts}".')
             application_properties[self.ts_app_prop_name] = ts
 
-        msg = ServiceBusMessage(body=body, application_properties=application_properties)
+        msg = ServiceBusMessage(body=body, application_properties=application_properties, session_id=session_id)
         transformer = self._get_transformer()
 
         if transformer:
@@ -1030,7 +1053,7 @@ class ServiceBusHandler:
         return msg
 
     async def send_message(self, namespaces: list, topics: list, message_body: str, application_properties: dict,
-                           src_enqueued_time_utc: datetime.datetime):
+                           src_enqueued_time_utc: datetime.datetime, session_id: str = None):
         """
         Send a message to the correct namespace and topic (batched by default).
 
@@ -1057,7 +1080,7 @@ class ServiceBusHandler:
 
         await asyncio.gather(*[
             self._get_batcher(ns, topics[idx]).add_and_wait(
-                self._build_message(message_body, application_properties, topics[idx])
+                self._build_message(message_body, application_properties, topics[idx], session_id)
             )
             for idx, ns in enumerate(namespaces)
         ])
