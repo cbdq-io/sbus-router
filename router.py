@@ -63,6 +63,11 @@ from prometheus_client import Counter, Summary, start_http_server
 __version__ = '2.0.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
+SESSION_RECEIVER_CREATED = Counter(
+    'sb_session_receiver_created_total',
+    'Number of session receivers created',
+    ['topic', 'subscription']
+)
 
 
 def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> logging.Logger:
@@ -767,10 +772,10 @@ class ServiceBusHandler:
                 session_id=NEXT_AVAILABLE_SESSION,
                 auto_lock_renewer=self.lock_renewer,
                 max_auto_renew_duration=300,
-                max_wait_time=2,
                 prefetch_count=0
             )
             logger.debug(f'Created a receiver for {topic_name}/{subscription_name} ({receiver.session.session_id})')
+            SESSION_RECEIVER_CREATED.labels(topic_name, subscription_name).inc()
         else:
             logger.debug(f'Creating a non-sessioned receiver for {topic_name}/{subscription_name}...')
             receiver = self.source_client.get_subscription_receiver(
