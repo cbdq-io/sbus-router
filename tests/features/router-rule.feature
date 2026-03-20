@@ -24,6 +24,7 @@ Feature: Router Rule
             | { "destination_namespaces": "IE", "destination_topics": "bar", "jmespath": "details[?telephone_number].telephone_number", "regexp": "^\\+353", "source_subscription": "foo", "source_topic": "foo"} | input-3.json | foo          | False    | 0             |
             | { "destination_namespaces": "", "destination_topics": "", "jmespath": "country", "regexp": "^FR$", "source_subscription": "foo", "source_topic": "foo"}                                             | input-5.json | foo          | True     | 0             |
             | { "destination_namespaces": "", "destination_topics": "", "jmespath": "country", "regexp": "^FR$", "source_subscription": "foo", "source_topic": "foo", "session_count": 42}                        | input-7.txt  | foo          | False    | 42            |
+            | { "destination_namespaces": "", "destination_topics": "", "jmespath": "country", "regexp": "^FR$", "source_subscription": "foo", "source_topic": "foo", "session_ids": "42"}                        | input-7.txt  | foo          | False    | 1             |
 
     Scenario Outline: Rule Exceptions
         Given an invalid Router Rule of <rule>

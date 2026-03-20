@@ -39,6 +39,11 @@
       "description": "The number of sessions on the subscription (zero if sessions are not enabled).",
       "type": "integer"
     },
+    "session_ids": {
+      "default": "",
+      "description": "A CSV list of session ids to connect to.",
+      "type": "string"
+    },
     "source_subscription": {
       "description": "The subscription from which data will be retrieved.",
       "type": "string"

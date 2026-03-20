@@ -5,6 +5,23 @@
 
 ### Features
 
+* Add the session_ids to the router rules. [Ben Dalling]
+
+### Fix
+
+* Corrects memory leak, but adds a side affect of session starvation. [Ben Dalling]
+
+### Continuous Integration
+
+* Update Trivy action in the CI workflow to 0.35.0 from 0.34.0. [Ben Dalling]
+
+* Update Trivy action in the CI workflow. [Ben Dalling]
+
+
+## 2.0.0 (2026-02-20)
+
+### Features
+
 * Replace is_session_required with session_count and remove max_auto_renew_duration and max_tasks from the rule definitions. [Ben Dalling]
 
 ### Fix
