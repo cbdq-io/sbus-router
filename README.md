@@ -42,6 +42,8 @@ The configurable fields for rules are:
 - `regexp`: A
   [regular expression](https://en.wikipedia.org/wiki/Regular_expression)
   that will me used to match against the data returned from `jmespath`.
+- `session_ids`: A preferred method to `session_count` that works if the
+  session IDs are static.  Provided as a CSV value (e.g. `0,1`).
 - `session_count`: The number of sessions on the subscription.  Defaults to
   0 which indicates that the subscription is not session enabled.
 - `source_subscription`: The subscription from which data will be retrieved.

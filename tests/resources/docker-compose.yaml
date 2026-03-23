@@ -1,21 +1,21 @@
 ---
 services:
   emulator:
-    container_name: "emulator"
+    container_name: emulator
     depends_on:
       sqledge:
         condition: service_healthy
     environment:
+      ACCEPT_EULA: Y
+      MSSQL_SA_PASSWORD: Secret123
       SQL_SERVER: sqledge
-      MSSQL_SA_PASSWORD: "Secret123"
-      ACCEPT_EULA: "Y"
+      SQL_WAIT_INTERVAL: "0"
     image: mcr.microsoft.com/azure-messaging/servicebus-emulator:latest
     ports:
-      - "5672:5672"
-      - "8080:8080"
+      - 5672:5672
+      - 8080:8080
     volumes:
-      - "./sbus-landing-config.json:/ServiceBus_Emulator/ConfigFiles/Config.json"
-
+      - ./sbus-landing-config.json:/ServiceBus_Emulator/ConfigFiles/Config.json
   router:
     build: ../..
     container_name: router
@@ -27,42 +27,58 @@ services:
       LOG_FORMAT: "%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s"
       LOG_LEVEL: DEBUG
       ROUTER_BATCH_MAX_WAIT_MS: 0
-      ROUTER_CUSTOM_TRANSFORMER: "custom:transform"
-      ROUTER_NAMESPACE_GB_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
-      ROUTER_NAMESPACE_IE_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
-      ROUTER_RULE_COUNTRY_FR: '{ "destination_namespaces": "", "destination_topics": "", "jmespath": "country", "regexp": "^$$ISO_3166_1_ALPHA_2$", "source_subscription": "test", "source_topic": "topic.1"}'
-      ROUTER_RULE_COUNTRY_GB: '{ "destination_namespaces": "GB", "destination_topics": "gb.topic", "jmespath": "country", "regexp": "^GB$", "source_subscription": "test", "source_topic": "topic.1"}'
-      ROUTER_RULE_COUNTRY_IE: '{ "destination_namespaces": "IE", "destination_topics": "ie.topic", "jmespath": "country", "regexp": "^IE$", "source_subscription": "test", "source_topic": "topic.2", "session_ids": "42"}'
-      ROUTER_RULE_COUNTRY_ALL: '{ "destination_namespaces": "GB,IE", "destination_topics": "gb.topic,ie.topic", "jmespath": "destination", "regexp": "^ALL$", "source_subscription": "test", "source_topic": "topic.2", "session_ids": "42"}'
+      ROUTER_CUSTOM_TRANSFORMER: custom:transform
+      ROUTER_NAMESPACE_GB_CONNECTION_STRING: Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
+      ROUTER_NAMESPACE_IE_CONNECTION_STRING: Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
+      ROUTER_RULE_COUNTRY_ALL: '{ "destination_namespaces": "GB,IE",
+        "destination_topics": "gb.topic,ie.topic", "jmespath": "destination",
+        "regexp": "^ALL$", "source_subscription": "test", "source_topic":
+        "topic.2", "session_ids": "42"}'
+      ROUTER_RULE_COUNTRY_FR: '{ "destination_namespaces": "", "destination_topics":
+        "", "jmespath": "country", "regexp": "^$$ISO_3166_1_ALPHA_2$",
+        "source_subscription": "test", "source_topic": "topic.1"}'
+      ROUTER_RULE_COUNTRY_GB: '{ "destination_namespaces": "GB", "destination_topics":
+        "gb.topic", "jmespath": "country", "regexp": "^GB$",
+        "source_subscription": "test", "source_topic": "topic.1"}'
+      ROUTER_RULE_COUNTRY_IE: '{ "destination_namespaces": "IE", "destination_topics":
+        "ie.topic", "jmespath": "country", "regexp": "^IE$",
+        "source_subscription": "test", "source_topic": "topic.2", "session_ids":
+        "42"}'
       ROUTER_RULE_GB_TELNO: '{"destination_namespaces":"GB","destination_topics":"gb.topic","jmespath":"details[?telephone_number].telephone_number","regexp":"^.*44","source_subscription":"test","source_topic":"topic.1"}'
-      ROUTER_RULE_IE_TELNO: '{"destination_namespaces":"IE","destination_topics":"ie.topic","jmespath":"details[?telephone_number].telephone_number","regexp":"^.*353","source_subscription":"test","source_topic":"topic.2", "session_ids": "42"}'
-      ROUTER_SOURCE_CONNECTION_STRING: "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
-      ROUTER_TIMESTAMP_APP_PROPERTY_NAME: "__routed_at"
+      ROUTER_RULE_IE_TELNO: '{"destination_namespaces":"IE","destination_topics":"ie.topic","jmespath":"details[?telephone_number].telephone_number","regexp":"^.*353","source_subscription":"test","source_topic":"topic.2",
+        "session_ids": "42"}'
+      ROUTER_SOURCE_CONNECTION_STRING: Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
+      ROUTER_TIMESTAMP_APP_PROPERTY_NAME: __routed_at
     image: router:latest
     ports:
-      - "8000:8000"
+      - 8000:8000
     volumes:
-      - "./custom.py:/home/appuser/custom.py"
-
+      - ./custom.py:/home/appuser/custom.py
   sqledge:
-    container_name: "sqledge"
+    container_name: sqledge
     environment:
-      ACCEPT_EULA: "Y"
-      MSSQL_SA_PASSWORD: "Secret123"
+      ACCEPT_EULA: Y
+      MSSQL_SA_PASSWORD: Secret123
     healthcheck:
-      test: timeout 1 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/1433'
-    image: "mcr.microsoft.com/azure-sql-edge:latest"
-
+      interval: 1m
+      retries: 3
+      start_interval: 1s
+      start_period: 15s
+      test: /bin/sh -c "/opt/mssql-tools/bin/sqlcmd -U sa -P $$MSSQL_SA_PASSWORD -Q
+        'SELECT 1'"
+      timeout: 5s
+    image: mcr.microsoft.com/azure-sql-edge:latest
+    platform: linux/x86_64
   sut:
     build: sut
     command:
-      - "-c"
-      - "Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;"
-      - "-f"
-      - "/usr/local/etc/Config.json"
+      - -c
+      - Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
+      - -f
+      - /usr/local/etc/Config.json
     container_name: sut
     depends_on:
       emulator:
         condition: service_started
     volumes:
-      - "./sbus-landing-config.json:/usr/local/etc/Config.json"
+      - ./sbus-landing-config.json:/usr/local/etc/Config.json
