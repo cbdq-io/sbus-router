@@ -79,6 +79,8 @@
 
 ### Continuous Integration
 
+* Bump Trivy action in periodic scan to 0.35.0. [Ben Dalling]
+
 * Have dependabot keep GitHub actions updated. [Ben Dalling]
 
 
