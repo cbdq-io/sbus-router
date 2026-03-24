@@ -25,6 +25,16 @@
   updated-dependencies:
   - dependency-name: actions/setup-python
     dependency-version: '6'
+* Bump docker/login-action from 3 to 4. [dependabot[bot]]
+
+  Bumps [docker/login-action](https://github.com/docker/login-action) from 3 to 4.
+  - [Release notes](https://github.com/docker/login-action/releases)
+  - [Commits](https://github.com/docker/login-action/compare/v3...v4)
+
+  ---
+  updated-dependencies:
+  - dependency-name: docker/login-action
+    dependency-version: '4'
     dependency-type: direct:production
     update-type: version-update:semver-major
   ...
