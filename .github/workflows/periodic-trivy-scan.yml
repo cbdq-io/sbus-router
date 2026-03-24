@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Docker login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
@@ -51,7 +51,7 @@ jobs:
           severity: MEDIUM,HIGH,CRITICAL
 
       - name: Upload SARIF file to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-results.sarif
 
@@ -74,7 +74,7 @@ jobs:
 
       - name: Create GitHub Issue for Vulnerabilities
         if: steps.check-vulns.outputs.count != '0'
-        uses: peter-evans/create-issue-from-file@v5
+        uses: peter-evans/create-issue-from-file@v6
         with:
           title: "Trivy Scan: Vulnerabilities found in image `${{ steps.get-tag.outputs.tag }}`"
           content-filepath: trivy-results.md
