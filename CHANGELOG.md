@@ -6,6 +6,7 @@
 ### Build
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 * Bump actions/checkout from 4 to 6. [dependabot[bot]]
 
   Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6.
@@ -48,6 +49,18 @@
   - dependency-name: github/codeql-action
 >>>>>>> dependabot/github_actions/github/codeql-action-4
     dependency-version: '4'
+=======
+* Bump peter-evans/create-issue-from-file from 5 to 6. [dependabot[bot]]
+
+  Bumps [peter-evans/create-issue-from-file](https://github.com/peter-evans/create-issue-from-file) from 5 to 6.
+  - [Release notes](https://github.com/peter-evans/create-issue-from-file/releases)
+  - [Commits](https://github.com/peter-evans/create-issue-from-file/compare/v5...v6)
+
+  ---
+  updated-dependencies:
+  - dependency-name: peter-evans/create-issue-from-file
+    dependency-version: '6'
+>>>>>>> dependabot/github_actions/peter-evans/create-issue-from-file-6
     dependency-type: direct:production
     update-type: version-update:semver-major
   ...
