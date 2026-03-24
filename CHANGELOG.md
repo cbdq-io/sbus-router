@@ -1,6 +1,13 @@
 # Changelog
 
 
+## Unreleased
+
+### Continuous Integration
+
+* Have dependabot keep GitHub actions updated. [Ben Dalling]
+
+
 ## 2.1.0 (2026-03-20)
 
 ### Features
