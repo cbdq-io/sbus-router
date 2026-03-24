@@ -74,7 +74,7 @@ jobs:
 
       - name: Create GitHub Issue for Vulnerabilities
         if: steps.check-vulns.outputs.count != '0'
-        uses: peter-evans/create-issue-from-file@v5
+        uses: peter-evans/create-issue-from-file@v6
         with:
           title: "Trivy Scan: Vulnerabilities found in image `${{ steps.get-tag.outputs.tag }}`"
           content-filepath: trivy-results.md
