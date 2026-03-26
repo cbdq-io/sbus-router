@@ -36,6 +36,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 import asyncio
 import contextlib
 import datetime
+import hashlib
 import importlib
 import inspect
 import json
@@ -457,6 +458,17 @@ class EnvironmentConfigParser:
     def __init__(self, environ: dict = dict(os.environ)) -> None:
         self._environ = environ
 
+    def is_deduplication_enabled(self) -> bool:
+        """
+        Indicate if deduplication is enabled or not.
+
+        Returns
+        -------
+        bool
+            True if deduplication is enabled, false otherwise.
+        """
+        return self._environ.get('ROUTER_ENABLE_DEDUPLICATION', '0') == '1'
+
     def get_prefetch_count(self) -> int:
         """
         Get the number of messages to be prefetched by the client.
@@ -778,6 +790,17 @@ class ServiceBusHandler:
         if self.source_client:
             await self.source_client.close()
 
+    def get_message_id(self, message_body: str, message_application_properties: dict,
+                       is_deduplication_enabled: bool) -> str:
+        """Provide a suitable message ID."""
+        if not is_deduplication_enabled:
+            return None
+
+        if 'message_id' in message_application_properties:
+            return message_application_properties['message_id']
+
+        return hashlib.sha256(message_body.encode()).hexdigest()
+
     async def get_receiver(self, topic_name: str, subscription_name: str, session_id: str = None) -> ServiceBusReceiver:
         """Get a receiver for a topic/subscription."""
         if session_id is not None:
@@ -1039,7 +1062,11 @@ class ServiceBusHandler:
             logger.debug(f'Setting application property "{self.ts_app_prop_name}" to "{ts}".')
             application_properties[self.ts_app_prop_name] = ts
 
-        msg = ServiceBusMessage(body=body, application_properties=application_properties, session_id=session_id)
+        msg = ServiceBusMessage(
+            body=body,
+            application_properties=application_properties,
+            session_id=session_id,
+            message_id=self.get_message_id(body, application_properties, self.config.is_deduplication_enabled()))
         transformer = self._get_transformer()
 
         if transformer:

@@ -13,6 +13,7 @@ least one rule configured  (see below).
 | LOG_LEVEL | | WARN | The log level for the router.|
 | ROUTER_BATCH_MAX_MESSAGES | No | 256 | The max messages collected before sending as a batch. |
 | ROUTER_CUSTOM_TRANSFORMER | No | N/A | See below. |
+| ROUTER_ENABLE_DEDUPLICATION | No | 0 | If set to "1" will set the message ID on messages based upon the SHA256 of the message body. |
 | ROUTER_PREFETCH_COUNT | No | 100 | The maximum number of messages to cache with each request to the service. |
 | ROUTER_PROMETHEUS_PORT | No | 8000 | The port for Prometheus to start on. |
 | ROUTER_SOURCE_CONNECTION_STRING | Yes | | The connection string for the source Service Bus namespace. |
