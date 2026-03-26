@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+### Features
+
+* Add the ROUTER_ENABLE_DEDUPLICATION feature flag. [Ben Dalling]
+
 ### Build
 
 * Bump peter-evans/create-issue-from-file from 5 to 6. [dependabot[bot]]
