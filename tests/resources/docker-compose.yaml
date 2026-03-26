@@ -28,6 +28,7 @@ services:
       LOG_LEVEL: DEBUG
       ROUTER_BATCH_MAX_WAIT_MS: 0
       ROUTER_CUSTOM_TRANSFORMER: custom:transform
+      ROUTER_ENABLE_DEDUPLICATION: 1
       ROUTER_NAMESPACE_GB_CONNECTION_STRING: Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
       ROUTER_NAMESPACE_IE_CONNECTION_STRING: Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
       ROUTER_RULE_COUNTRY_ALL: '{ "destination_namespaces": "GB,IE",

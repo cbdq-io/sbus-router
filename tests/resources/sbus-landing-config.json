@@ -10,7 +10,7 @@
             "Properties": {
               "DefaultMessageTimeToLive": "PT1H",
               "DuplicateDetectionHistoryTimeWindow": "PT20S",
-              "RequiresDuplicateDetection": false
+              "RequiresDuplicateDetection": true
             },
             "Subscriptions": [
               {
@@ -32,7 +32,7 @@
             "Properties": {
               "DefaultMessageTimeToLive": "PT1H",
               "DuplicateDetectionHistoryTimeWindow": "PT20S",
-              "RequiresDuplicateDetection": false
+              "RequiresDuplicateDetection": true
             },
             "Subscriptions": [
               {
