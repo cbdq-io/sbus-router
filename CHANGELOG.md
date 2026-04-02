@@ -83,6 +83,8 @@
 
 ### Continuous Integration
 
+* Skip change log update from dependabot PRs. [Ben Dalling]
+
 * Bump Trivy action in periodic scan to 0.35.0. [Ben Dalling]
 
 * Have dependabot keep GitHub actions updated. [Ben Dalling]
