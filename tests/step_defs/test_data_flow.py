@@ -65,6 +65,7 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
             with client.get_topic_sender(input_topic) as sender:
                 sender.send_messages(ServiceBusMessage(body=message_body, session_id='42'))
                 pytest.skip(f'Output topic is "{output_topic}".')
+                sender.send_messages(ServiceBusMessage(body=message_body, session_id='42'))
 
 
 @then('the DLQ count is 2')

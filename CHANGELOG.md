@@ -5,6 +5,95 @@
 
 ### Features
 
+* Add the ROUTER_ENABLE_DEDUPLICATION feature flag. [Ben Dalling]
+
+### Build
+
+* Bump peter-evans/create-issue-from-file from 5 to 6. [dependabot[bot]]
+
+  Bumps [peter-evans/create-issue-from-file](https://github.com/peter-evans/create-issue-from-file) from 5 to 6.
+  - [Release notes](https://github.com/peter-evans/create-issue-from-file/releases)
+  - [Commits](https://github.com/peter-evans/create-issue-from-file/compare/v5...v6)
+
+  ---
+  updated-dependencies:
+  - dependency-name: peter-evans/create-issue-from-file
+    dependency-version: '6'
+    dependency-type: direct:production
+    update-type: version-update:semver-major
+  ...
+
+* Bump github/codeql-action from 3 to 4. [dependabot[bot]]
+
+  Bumps [github/codeql-action](https://github.com/github/codeql-action) from 3 to 4.
+  - [Release notes](https://github.com/github/codeql-action/releases)
+  - [Changelog](https://github.com/github/codeql-action/blob/main/CHANGELOG.md)
+  - [Commits](https://github.com/github/codeql-action/compare/v3...v4)
+
+  ---
+  updated-dependencies:
+  - dependency-name: github/codeql-action
+    dependency-version: '4'
+    dependency-type: direct:production
+    update-type: version-update:semver-major
+  ...
+
+* Bump docker/login-action from 3 to 4. [dependabot[bot]]
+
+  Bumps [docker/login-action](https://github.com/docker/login-action) from 3 to 4.
+  - [Release notes](https://github.com/docker/login-action/releases)
+  - [Commits](https://github.com/docker/login-action/compare/v3...v4)
+
+  ---
+  updated-dependencies:
+  - dependency-name: docker/login-action
+    dependency-version: '4'
+    dependency-type: direct:production
+    update-type: version-update:semver-major
+  ...
+
+* Bump actions/setup-python from 5 to 6. [dependabot[bot]]
+
+  Bumps [actions/setup-python](https://github.com/actions/setup-python) from 5 to 6.
+  - [Release notes](https://github.com/actions/setup-python/releases)
+  - [Commits](https://github.com/actions/setup-python/compare/v5...v6)
+
+  ---
+  updated-dependencies:
+  - dependency-name: actions/setup-python
+    dependency-version: '6'
+    dependency-type: direct:production
+    update-type: version-update:semver-major
+  ...
+
+* Bump actions/checkout from 4 to 6. [dependabot[bot]]
+
+  Bumps [actions/checkout](https://github.com/actions/checkout) from 4 to 6.
+  - [Release notes](https://github.com/actions/checkout/releases)
+  - [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md)
+  - [Commits](https://github.com/actions/checkout/compare/v4...v6)
+
+  ---
+  updated-dependencies:
+  - dependency-name: actions/checkout
+    dependency-version: '6'
+    dependency-type: direct:production
+    update-type: version-update:semver-major
+  ...
+
+### Continuous Integration
+
+* Skip change log update from dependabot PRs. [Ben Dalling]
+
+* Bump Trivy action in periodic scan to 0.35.0. [Ben Dalling]
+
+* Have dependabot keep GitHub actions updated. [Ben Dalling]
+
+
+## 2.1.0 (2026-03-20)
+
+### Features
+
 * Add the session_ids to the router rules. [Ben Dalling]
 
 ### Fix

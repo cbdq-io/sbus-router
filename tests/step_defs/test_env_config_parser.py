@@ -1,8 +1,14 @@
 """Environment Configuration Parser feature tests."""
+import json
 
 from pytest_bdd import given, parsers, scenario, then, when
 
 from router import EnvironmentConfigParser, ServiceBusHandler
+
+
+@scenario('environment-config-parser.feature', 'Construct Message ID')
+def test_construct_message_id():
+    """Construct Message ID."""
 
 
 @scenario('environment-config-parser.feature', 'EnvironmentConfigParser Methods')
@@ -25,6 +31,18 @@ def _():
 def _(key: str, value: str, environ: dict):
     """the environment variable <key> has a value of <value>."""
     environ[key] = value
+
+
+@when(parsers.parse('the message body is {message_body}'), target_fixture='message_body')
+def _(message_body: str):
+    """the message body is <message_body>."""
+    return message_body
+
+
+@when(parsers.parse('the message_id is {message_id}'), target_fixture='message_id')
+def _(message_id: str):
+    """the message_id is <message_id>."""
+    return message_id
 
 
 @then(parsers.parse('service bus count is {expected_count:d} with the namespace {namespace}'))
@@ -69,3 +87,38 @@ def _(method_name: str, expected_value: str, environ: dict):
     message = f'Expected return value of {method_name} to be "{expected_value}" '
     message += f'but got "{actual_value}" instead.'
     assert actual_value == expected_value, message
+    assert not widget.is_deduplication_enabled()
+
+
+@then(parsers.parse('the constructed message_id is {expected_message_id}'))
+def _(expected_message_id: str, message_body: str, message_id: str, environ: dict):
+    """the constructed message_id is <expected_message_id>."""
+    environ['ROUTER_SOURCE_CONNECTION_STRING'] = 'foobar'
+    environ['ROUTER_NAMESPACE_IE_CONNECTION_STRING'] = 'foobar'
+    application_properties = {}
+    widget = EnvironmentConfigParser(environ)
+    is_deduplication_enabled = widget.is_deduplication_enabled()
+    handler = ServiceBusHandler(widget)
+
+    if expected_message_id == 'None':
+        expected_message_id = None
+
+    if message_id != 'None':
+        application_properties['message_id'] = message_id
+
+    actual_message_id = handler.get_message_id(
+        message_body=message_body,
+        message_application_properties=application_properties,
+        is_deduplication_enabled=is_deduplication_enabled
+    )
+
+    context = {
+        'expected_message_id': expected_message_id,
+        'message_body': message_body,
+        'message_id': message_id,
+        'environ': environ,
+        'is_deduplication_enabled': is_deduplication_enabled,
+        'actual_message_id': actual_message_id
+    }
+
+    assert actual_message_id == expected_message_id, json.dumps(context)

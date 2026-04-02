@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Display Tag Information
         run: |
@@ -31,7 +31,7 @@ jobs:
         run: docker build -t ${{ env.REGISTRY }}/${{ github.repository }}:${{ github.ref_name }} .
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
