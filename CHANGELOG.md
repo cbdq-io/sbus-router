@@ -1,7 +1,7 @@
 # Changelog
 
 
-## Unreleased
+## 2.2.0 (2026-04-02)
 
 ### Features
 
@@ -82,6 +82,8 @@
   ...
 
 ### Continuous Integration
+
+* Skip change log update from dependabot PRs. [Ben Dalling]
 
 * Bump Trivy action in periodic scan to 0.35.0. [Ben Dalling]
 
