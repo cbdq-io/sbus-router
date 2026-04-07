@@ -61,7 +61,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '2.2.0'
+__version__ = '2.2.1'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 SESSION_RECEIVER_CREATED = Counter(
@@ -808,7 +808,6 @@ class ServiceBusHandler:
                 topic_name=topic_name,
                 subscription_name=subscription_name,
                 session_id=session_id,
-                auto_lock_renewer=self.lock_renewer,
                 max_auto_renew_duration=300,
                 prefetch_count=0
             )
@@ -950,12 +949,17 @@ class ServiceBusHandler:
                         message.enqueued_time_utc,
                         out_session_id
                     )
-                    await receiver.complete_message(message)
-                    return
                 except Exception as e:
                     logger.error(f'Failed to send message ({",".join(destination_namespaces)}): {e}')
                     await receiver.abandon_message(message)
                     return
+
+                try:
+                    await receiver.complete_message(message)
+                    return
+                except Exception as e:
+                    logger.error(f'Send succeeded but complete failed: {e}')
+                    await receiver.abandon_message(message)
 
         # No matching rule: Send to DLQ
         logger.warning(f'No rules match message from {source_topic}, sending to the DLQ.')
@@ -1000,6 +1004,13 @@ class ServiceBusHandler:
         while not self.shutdown_event.is_set():
             try:
                 async with await self.get_receiver(topic_name, subscription_name, session_id) as receiver:
+                    if receiver.session:
+                        self.lock_renewer.register(
+                            receiver,
+                            receiver.session,
+                            max_lock_renewal_duration=3600
+                        )
+                        logger.debug(f'Registered lock renewal for session {receiver.session.session_id}')
                     await self._receive_loop(topic_name, receiver, session_id)
             except asyncio.CancelledError:
                 break
@@ -1099,15 +1110,12 @@ class ServiceBusHandler:
         """
         # enqueue on each relevant destination batcher and await per-item flush
         timestamp = src_enqueued_time_utc.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-
-        if application_properties:
-            application_properties['__src_enqueued_time_utc'] = timestamp
-        else:
-            application_properties = {'__src_enqueued_time_utc': timestamp}
+        props = dict(application_properties) if application_properties else {}
+        props['__src_enqueued_time_utc'] = timestamp
 
         await asyncio.gather(*[
             self._get_batcher(ns, topics[idx]).add_and_wait(
-                self._build_message(message_body, application_properties, topics[idx], session_id)
+                self._build_message(message_body, props, topics[idx], session_id)
             )
             for idx, ns in enumerate(namespaces)
         ])
