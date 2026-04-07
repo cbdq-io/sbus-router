@@ -1110,15 +1110,12 @@ class ServiceBusHandler:
         """
         # enqueue on each relevant destination batcher and await per-item flush
         timestamp = src_enqueued_time_utc.isoformat(timespec='milliseconds').replace('+00:00', 'Z')
-
-        if application_properties:
-            application_properties['__src_enqueued_time_utc'] = timestamp
-        else:
-            application_properties = {'__src_enqueued_time_utc': timestamp}
+        props = dict(application_properties) if application_properties else {}
+        props['__src_enqueued_time_utc'] = timestamp
 
         await asyncio.gather(*[
             self._get_batcher(ns, topics[idx]).add_and_wait(
-                self._build_message(message_body, application_properties, topics[idx], session_id)
+                self._build_message(message_body, props, topics[idx], session_id)
             )
             for idx, ns in enumerate(namespaces)
         ])
