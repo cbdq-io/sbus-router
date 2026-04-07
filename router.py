@@ -949,12 +949,17 @@ class ServiceBusHandler:
                         message.enqueued_time_utc,
                         out_session_id
                     )
-                    await receiver.complete_message(message)
-                    return
                 except Exception as e:
                     logger.error(f'Failed to send message ({",".join(destination_namespaces)}): {e}')
                     await receiver.abandon_message(message)
                     return
+
+                try:
+                    await receiver.complete_message(message)
+                    return
+                except Exception as e:
+                    logger.error(f'Send succeeded but complete failed: {e}')
+                    await receiver.abandon_message(message)
 
         # No matching rule: Send to DLQ
         logger.warning(f'No rules match message from {source_topic}, sending to the DLQ.')
