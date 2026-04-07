@@ -1,6 +1,15 @@
 # Changelog
 
 
+## Unreleased
+
+### Fix
+
+* Separate completion from send errors. [Ben Dalling]
+
+* Refactor how session locks are used. [Ben Dalling]
+
+
 ## 2.2.0 (2026-04-02)
 
 ### Features
