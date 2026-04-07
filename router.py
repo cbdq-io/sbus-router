@@ -808,7 +808,6 @@ class ServiceBusHandler:
                 topic_name=topic_name,
                 subscription_name=subscription_name,
                 session_id=session_id,
-                auto_lock_renewer=self.lock_renewer,
                 max_auto_renew_duration=300,
                 prefetch_count=0
             )
@@ -1000,6 +999,13 @@ class ServiceBusHandler:
         while not self.shutdown_event.is_set():
             try:
                 async with await self.get_receiver(topic_name, subscription_name, session_id) as receiver:
+                    if receiver.session:
+                        self.lock_renewer.register(
+                            receiver,
+                            receiver.session,
+                            max_lock_renewal_duration=3600
+                        )
+                        logger.debug(f'Registered lock renewal for session {receiver.session.session_id}')
                     await self._receive_loop(topic_name, receiver, session_id)
             except asyncio.CancelledError:
                 break
