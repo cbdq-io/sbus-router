@@ -3,6 +3,13 @@
 
 ## Unreleased
 
+### Build
+
+* Release/2.2.2. [Ben Dalling]
+
+
+## 2.2.1 (2026-04-07)
+
 ### Fix
 
 * Separate completion from send errors. [Ben Dalling]
