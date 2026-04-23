@@ -1,6 +1,13 @@
 # Changelog
 
 
+## 2.2.2 (2026-04-23)
+
+### Build
+
+* Release/2.2.2. [Ben Dalling]
+
+
 ## 2.2.1 (2026-04-07)
 
 ### Fix
