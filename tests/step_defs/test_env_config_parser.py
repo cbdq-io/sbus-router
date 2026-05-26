@@ -3,10 +3,10 @@ import json
 
 from pytest_bdd import given, parsers, scenario, then, when
 
-from router import EnvironmentConfigParser, ServiceBusHandler
+from router import EnvironmentConfigParser, ServiceBusHandler, get_message_id
 
 
-@scenario('environment-config-parser.feature', 'Construct Message ID')
+@scenario('environment-config-parser.feature', 'Construct Message ID and Correlation ID')
 def test_construct_message_id():
     """Construct Message ID."""
 
@@ -43,6 +43,12 @@ def _(message_body: str):
 def _(message_id: str):
     """the message_id is <message_id>."""
     return message_id
+
+
+@when(parsers.parse('the correlation_id is {correlation_id}'), target_fixture='correlation_id')
+def _(correlation_id: str):
+    """the message_id is <correlation_id>."""
+    return correlation_id
 
 
 @then(parsers.parse('service bus count is {expected_count:d} with the namespace {namespace}'))
@@ -98,7 +104,6 @@ def _(expected_message_id: str, message_body: str, message_id: str, environ: dic
     application_properties = {}
     widget = EnvironmentConfigParser(environ)
     is_deduplication_enabled = widget.is_deduplication_enabled()
-    handler = ServiceBusHandler(widget)
 
     if expected_message_id == 'None':
         expected_message_id = None
@@ -106,10 +111,11 @@ def _(expected_message_id: str, message_body: str, message_id: str, environ: dic
     if message_id != 'None':
         application_properties['message_id'] = message_id
 
-    actual_message_id = handler.get_message_id(
+    actual_message_id = get_message_id(
         message_body=message_body,
         message_application_properties=application_properties,
-        is_deduplication_enabled=is_deduplication_enabled
+        id_type='deduplication',
+        is_id_required=is_deduplication_enabled
     )
 
     context = {

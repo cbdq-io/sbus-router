@@ -10,18 +10,18 @@ Scenario Outline: Inject a Message and Confirm the Destination
     And the input topic is <input_topic>
     And the output topic is <output_topic>
     When the input message is sent
-    Then the expected output message is received
+    Then the expected output message is received with correlation ID <correlation_id>
 
     Examples:
-        | input_data_file | input_topic   | output_topic      |
-        | input-6.json    | topic.2       | DLQ               |
-        | input-1.json    | topic.1       | gb.topic          |
-        | input-6.json    | topic.1       | DLQ               |
-        | input-2.json    | topic.2       | ie.topic          |
-        | input-3.json    | topic.1       | gb.topic          |
-        | input-4.json    | topic.2       | ie.topic          |
-        | input-5.json    | topic.1       | N/A               |
-        | input-8.json    | topic.2       | gb.topic,ie.topic |
+        | input_data_file | input_topic   | output_topic      | correlation_id |
+        | input-6.json    | topic.2       | DLQ               | N/A            |
+        | input-1.json    | topic.1       | gb.topic          | 42             |
+        | input-6.json    | topic.1       | DLQ               | N/A            |
+        | input-2.json    | topic.2       | ie.topic          | 42             |
+        | input-3.json    | topic.1       | gb.topic          | 42             |
+        | input-4.json    | topic.2       | ie.topic          | 42             |
+        | input-5.json    | topic.1       | N/A               | N/A            |
+        | input-8.json    | topic.2       | gb.topic,ie.topic | 42             |
 
 Scenario: Replay DLQ Message
     Given the landing Service Bus Emulator
