@@ -37,8 +37,9 @@ Feature: Environment Configuration Parser
         Then the constructed message_id is <expected_message_id> with a correlation_id of <expected_correlation_id>
 
         Examples:
-            | env_key                     | env_value | message_body  | message_id | correlation_id | expected_message_id                  | expected_correlation_id |
-            | ROUTER_ENABLE_DEDUPLICATION | 0         | Hello, world! | None       | None           | None                                 | None                    |
-            | ROUTER_ENABLE_DEDUPLICATION | 0         | Hello, world! | 42         | None           | None                                 | None                    |
-            | ROUTER_ENABLE_DEDUPLICATION | 1         | Hello, world! | 42         | None           | 42                                   | None                    |
-            | ROUTER_ENABLE_DEDUPLICATION | 1         | Hello, world! | None       | None           | 315f5bdb-76d0-78c4-3b8a-c0064e4a0164 | None                    |
+            | env_key                     | env_value | message_body  | message_id | correlation_id | expected_message_id                  | expected_correlation_id              |
+            | ROUTER_ENABLE_DEDUPLICATION | 0         | Hello, world! | None       | None           | None                                 | None                                 |
+            | ROUTER_ENABLE_DEDUPLICATION | 0         | Hello, world! | 42         | None           | None                                 | None                                 |
+            | ROUTER_ENABLE_DEDUPLICATION | 1         | Hello, world! | 42         | None           | 42                                   | None                                 |
+            | ROUTER_ENABLE_DEDUPLICATION | 1         | Hello, world! | None       | None           | 315f5bdb-76d0-78c4-3b8a-c0064e4a0164 | None                                 |
+            | SHA256_GUID_CORRELATION_ID  | 1         | Hello, world! | 42         | None           | None                                 | 315f5bdb-76d0-78c4-3b8a-c0064e4a0164 |
