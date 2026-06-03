@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+### Features
+
+* Add SHA256_GUID_CORRELATION_ID. [Ben Dalling]
+
 ### Build
 
 * Bump ghcr.io/devcontainers/features/docker-in-docker. [dependabot[bot]]

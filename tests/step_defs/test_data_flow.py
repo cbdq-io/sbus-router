@@ -89,7 +89,7 @@ def _(connection_string: str):
     assert deleted_messages == 1
 
 
-def is_message_valid(message: ServiceBusMessage, expected_body: str) -> bool:
+def is_message_valid(message: ServiceBusMessage, expected_body: str, correlation_id: str = None) -> bool:
     """
     Check the validity of the received message.
 
@@ -99,8 +99,8 @@ def is_message_valid(message: ServiceBusMessage, expected_body: str) -> bool:
         The message to be validated.
     expected_body : str
         The message body that is expected to be recieved.
-    topic_name : str
-        The name of the topic that the message was received from.
+    correlation_id : str
+        An expected correlation ID.
 
     Returns
     -------
@@ -119,6 +119,13 @@ def is_message_valid(message: ServiceBusMessage, expected_body: str) -> bool:
         logger.error(f'Actual message "{actual_body}".')
         response = False
 
+    if correlation_id and message.correlation_id != correlation_id:
+        logger.error(
+            f'Expected a correlation ID of <{correlation_id}>, but instead it is '
+            f'<{message.correlation_id}>.'
+        )
+        response = False
+
     return response
 
 
@@ -129,8 +136,8 @@ def is_application_propery_present(message: ServiceBusMessage, key: str) -> bool
     assert key.encode() in application_properties, message
 
 
-@then('the expected output message is received')
-def _(connection_string: str, input_topic: str, output_topic: str, message_body: str):
+@then(parsers.parse('the expected output message is received with correlation ID {correlation_id}'))
+def _(connection_string: str, input_topic: str, output_topic: str, message_body: str, correlation_id: str):
     """The expected output message is received."""
     output_topics = output_topic.split(',')
     client = ServiceBusClient.from_connection_string(connection_string)
@@ -159,6 +166,6 @@ def _(connection_string: str, input_topic: str, output_topic: str, message_body:
         receiver.close()
         client.close()
         assert message_received, f'Message not received within the retry limit from "{output_topic}".'
-        assert is_message_valid(message, message_body)
+        assert is_message_valid(message, message_body, correlation_id)
         is_application_propery_present(message, '__routed_at')
         is_application_propery_present(message, '__src_enqueued_time_utc')

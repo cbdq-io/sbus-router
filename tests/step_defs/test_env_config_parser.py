@@ -3,10 +3,10 @@ import json
 
 from pytest_bdd import given, parsers, scenario, then, when
 
-from router import EnvironmentConfigParser, ServiceBusHandler
+from router import EnvironmentConfigParser, ServiceBusHandler, get_message_id
 
 
-@scenario('environment-config-parser.feature', 'Construct Message ID')
+@scenario('environment-config-parser.feature', 'Construct Message ID and Correlation ID')
 def test_construct_message_id():
     """Construct Message ID."""
 
@@ -43,6 +43,12 @@ def _(message_body: str):
 def _(message_id: str):
     """the message_id is <message_id>."""
     return message_id
+
+
+@when(parsers.parse('the correlation_id is {correlation_id}'), target_fixture='correlation_id')
+def _(correlation_id: str):
+    """the message_id is <correlation_id>."""
+    return correlation_id
 
 
 @then(parsers.parse('service bus count is {expected_count:d} with the namespace {namespace}'))
@@ -90,35 +96,52 @@ def _(method_name: str, expected_value: str, environ: dict):
     assert not widget.is_deduplication_enabled()
 
 
-@then(parsers.parse('the constructed message_id is {expected_message_id}'))
-def _(expected_message_id: str, message_body: str, message_id: str, environ: dict):
+@then(
+        parsers.parse(
+            'the constructed message_id is {expected_message_id} with a correlation_id of {expected_correlation_id}'
+        )
+)
+def _(expected_message_id: str, expected_correlation_id: str, message_body: str, message_id: str, environ: dict):
     """the constructed message_id is <expected_message_id>."""
     environ['ROUTER_SOURCE_CONNECTION_STRING'] = 'foobar'
     environ['ROUTER_NAMESPACE_IE_CONNECTION_STRING'] = 'foobar'
     application_properties = {}
     widget = EnvironmentConfigParser(environ)
     is_deduplication_enabled = widget.is_deduplication_enabled()
-    handler = ServiceBusHandler(widget)
+    is_correlation_id_to_be_set = widget.is_correlation_id_to_be_set()
 
     if expected_message_id == 'None':
         expected_message_id = None
 
+    if expected_correlation_id == 'None':
+        expected_correlation_id = None
+
     if message_id != 'None':
         application_properties['message_id'] = message_id
 
-    actual_message_id = handler.get_message_id(
+    actual_message_id = get_message_id(
         message_body=message_body,
         message_application_properties=application_properties,
-        is_deduplication_enabled=is_deduplication_enabled
+        id_type='deduplication',
+        is_id_required=is_deduplication_enabled
+    )
+    actual_correlation_id = get_message_id(
+        message_body=message_body,
+        message_application_properties=application_properties,
+        id_type='correlation',
+        is_id_required=is_correlation_id_to_be_set
     )
 
     context = {
         'expected_message_id': expected_message_id,
+        'expected_correlation_id': expected_correlation_id,
         'message_body': message_body,
         'message_id': message_id,
         'environ': environ,
         'is_deduplication_enabled': is_deduplication_enabled,
-        'actual_message_id': actual_message_id
+        'actual_message_id': actual_message_id,
+        'actual_correlation_id': actual_correlation_id
     }
 
     assert actual_message_id == expected_message_id, json.dumps(context)
+    assert actual_correlation_id == expected_correlation_id, json.dumps(context)

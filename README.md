@@ -18,6 +18,7 @@ least one rule configured  (see below).
 | ROUTER_PROMETHEUS_PORT | No | 8000 | The port for Prometheus to start on. |
 | ROUTER_SOURCE_CONNECTION_STRING | Yes | | The connection string for the source Service Bus namespace. |
 | ROUTER_TIMESTAMP_APP_PROPERTY_NAME | No | N/A | If specified, will add a named application property containing an ISO 8601 string of when the message was routed. |
+| SHA256_GUID_CORRELATION_ID | No | 0 | If set to 1, a correlation ID based upon the routed message body will be set.  The format of the ID is a UUID created from the last 16 hex characters of an SHA256 hash. |
 
 ## Rules
 
