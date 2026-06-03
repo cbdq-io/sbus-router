@@ -46,6 +46,7 @@ import re
 import signal
 import sys
 import time
+import uuid
 from collections import defaultdict
 from string import Template
 from typing import Callable, Optional
@@ -61,7 +62,7 @@ from azure.servicebus.amqp import AmqpMessageBodyType
 from azure.servicebus.exceptions import OperationTimeoutError
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '2.2.3'
+__version__ = '2.3.0'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 SESSION_RECEIVER_CREATED = Counter(
@@ -90,6 +91,48 @@ def get_logger(logger_name: str, log_level=os.getenv('LOG_LEVEL', 'WARN')) -> lo
     logger = logging.getLogger(logger_name)
     logger.setLevel(level=log_level)
     return logger
+
+
+def get_message_id(message_body: str, message_application_properties: dict, id_type: str,
+                   is_id_required: bool) -> str:
+    """
+    Generate an ID for a message that can be used for deduplication or correlation.
+
+    Parameters
+    ----------
+    message_body : str
+        The body of the received message.
+    message_application_properties : dict
+        The application properties of the received message.
+    id_type : str
+        Is the ID for "deduplication" or "correlation".
+    is_id_required : bool
+        If set to False, return None.
+
+    Returns
+    -------
+    str
+        _description_
+    """
+    application_properties_map = {
+        'correlation': 'correlation_id',
+        'deduplication': 'message_id'
+    }
+    application_properties_key = application_properties_map[id_type]
+
+    if not is_id_required:
+        return None
+
+    if application_properties_key in message_application_properties:
+        existing_id = message_application_properties[application_properties_key]
+    else:
+        existing_id = None
+
+    if existing_id:
+        return existing_id
+
+    digest = hashlib.sha256(message_body.encode()).digest()
+    return str(uuid.UUID(bytes=digest[:16]))
 
 
 logging.basicConfig(
@@ -469,6 +512,17 @@ class EnvironmentConfigParser:
         """
         return self._environ.get('ROUTER_ENABLE_DEDUPLICATION', '0') == '1'
 
+    def is_correlation_id_to_be_set(self) -> bool:
+        """
+        Indicate if a correlation ID is to be set or not.
+
+        Returns
+        -------
+        bool
+            True if correlation ID is to be set.
+        """
+        return self._environ.get('SHA256_GUID_CORRELATION_ID', '0') == '1'
+
     def get_prefetch_count(self) -> int:
         """
         Get the number of messages to be prefetched by the client.
@@ -790,17 +844,6 @@ class ServiceBusHandler:
         if self.source_client:
             await self.source_client.close()
 
-    def get_message_id(self, message_body: str, message_application_properties: dict,
-                       is_deduplication_enabled: bool) -> str:
-        """Provide a suitable message ID."""
-        if not is_deduplication_enabled:
-            return None
-
-        if 'message_id' in message_application_properties:
-            return message_application_properties['message_id']
-
-        return hashlib.sha256(message_body.encode()).hexdigest()
-
     async def get_receiver(self, topic_name: str, subscription_name: str, session_id: str = None) -> ServiceBusReceiver:
         """Get a receiver for a topic/subscription."""
         if session_id is not None:
@@ -1076,8 +1119,20 @@ class ServiceBusHandler:
         msg = ServiceBusMessage(
             body=body,
             application_properties=application_properties,
+            correlation_id=get_message_id(
+                body,
+                application_properties,
+                'correlation',
+                self.config.is_correlation_id_to_be_set()
+            ),
             session_id=session_id,
-            message_id=self.get_message_id(body, application_properties, self.config.is_deduplication_enabled()))
+            message_id=get_message_id(
+                body,
+                application_properties,
+                'deduplication',
+                self.config.is_deduplication_enabled()
+            )
+        )
         transformer = self._get_transformer()
 
         if transformer:

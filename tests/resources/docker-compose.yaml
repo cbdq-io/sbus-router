@@ -50,6 +50,7 @@ services:
         "session_ids": "42"}'
       ROUTER_SOURCE_CONNECTION_STRING: Endpoint=sb://emulator;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;
       ROUTER_TIMESTAMP_APP_PROPERTY_NAME: __routed_at
+      SHA256_GUID_CORRELATION_ID: 1
     image: router:latest
     ports:
       - 8000:8000
