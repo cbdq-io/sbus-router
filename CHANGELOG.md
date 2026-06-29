@@ -1,6 +1,42 @@
 # Changelog
 
 
+## 2.3.1 (2026-06-29)
+
+### Fix
+
+* Update the version of the Git Flow workflow. [Ben Dalling]
+
+### Build
+
+* Bump actions/checkout from 6 to 7. [dependabot[bot]]
+
+  Bumps [actions/checkout](https://github.com/actions/checkout) from 6 to 7.
+  - [Release notes](https://github.com/actions/checkout/releases)
+  - [Changelog](https://github.com/actions/checkout/blob/main/CHANGELOG.md)
+  - [Commits](https://github.com/actions/checkout/compare/v6...v7)
+
+  ---
+  updated-dependencies:
+  - dependency-name: actions/checkout
+    dependency-version: '7'
+    dependency-type: direct:production
+    update-type: version-update:semver-major
+  ...
+
+* Bump ghcr.io/devcontainers/features/docker-in-docker. [dependabot[bot]]
+
+  Bumps ghcr.io/devcontainers/features/docker-in-docker from 3.0.1 to 3.1.0.
+
+  ---
+  updated-dependencies:
+  - dependency-name: ghcr.io/devcontainers/features/docker-in-docker
+    dependency-version: 3.1.0
+    dependency-type: direct:production
+    update-type: version-update:semver-minor
+  ...
+
+
 ## 2.3.0 (2026-06-03)
 
 ### Features
