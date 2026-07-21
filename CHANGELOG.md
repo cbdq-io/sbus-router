@@ -3,6 +3,25 @@
 
 ## Unreleased
 
+### Build
+
+* Bump actions/setup-python from 6 to 7. [dependabot[bot]]
+
+  Bumps [actions/setup-python](https://github.com/actions/setup-python) from 6 to 7.
+  - [Release notes](https://github.com/actions/setup-python/releases)
+  - [Commits](https://github.com/actions/setup-python/compare/v6...v7)
+
+  ---
+  updated-dependencies:
+  - dependency-name: actions/setup-python
+    dependency-version: '7'
+    dependency-type: direct:production
+    update-type: version-update:semver-major
+  ...
+
+
+## 2.3.1 (2026-06-29)
+
 ### Fix
 
 * Update the version of the Git Flow workflow. [Ben Dalling]
