@@ -5,6 +5,8 @@
 
 ### Fix
 
+* Acknowledge vulnerabilities. [Ben Dalling]
+
 * Change Dockerfile to use UID not name. [Ben Dalling]
 
 * Stop Git Flow running against PRs raised by dependabot. [Ben Dalling]
