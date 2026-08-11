@@ -21,6 +21,8 @@ permissions:
 
 jobs:
   GitFlow:
+    # Skip if the run was triggered by Dependabot or the branch is dependabot/*
+    if: ${{ github.actor != 'dependabot[bot]' && !startsWith(github.head_ref || '', 'dependabot/') && !startsWith(github.ref, 'refs/heads/dependabot/') }}
     runs-on: ubuntu-latest
 
     steps:

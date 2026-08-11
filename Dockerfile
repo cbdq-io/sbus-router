@@ -1,6 +1,6 @@
 FROM python:3.14
 
-USER root
+USER 0
 
 LABEL org.opencontainers.image.description "A configurable router for Azure Service Bus."
 
@@ -18,7 +18,7 @@ RUN apt-get update \
     --shell /usr/sbin/nologin appuser \
   && pip install --no-cache-dir --upgrade pip
 
-USER appuser
+USER 1000
 WORKDIR /home/appuser
 ENV ROUTER_PROMETHEUS_PORT=8000
 ENV PYTHONPATH=/home/appuser
