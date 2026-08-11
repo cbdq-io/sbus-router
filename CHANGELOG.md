@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+### Fix
+
+* Change Dockerfile to use UID not name. [Ben Dalling]
+
+* Stop Git Flow running against PRs raised by dependabot. [Ben Dalling]
+
 ### Build
 
 * Bump github/codeql-action from 4 to 4.37.4. [dependabot[bot]]
