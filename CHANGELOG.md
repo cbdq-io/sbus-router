@@ -1,9 +1,13 @@
 # Changelog
 
 
-## Unreleased
+## 2.3.3 (2026-08-12)
 
 ### Fix
+
+* Update the periodic scan. [Ben Dalling]
+
+* Add basic instructions for creating a release. [Ben Dalling]
 
 * Acknowledge vulnerabilities. [Ben Dalling]
 
