@@ -168,3 +168,6 @@ cython_debug/
 !.qlty/qlty.toml
 !.qlty/configs/
 !.qlty/configs/**
+
+# Ignore backup files
+*.bak
