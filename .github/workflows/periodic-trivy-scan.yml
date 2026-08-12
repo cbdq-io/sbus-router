@@ -41,6 +41,11 @@ jobs:
           echo "✅ Latest SemVer tag: $semver_tag"
           echo "tag=$semver_tag" >> $GITHUB_OUTPUT
 
+      - name: Remove Trivy Ignore File
+        # Temp removal of the file so that we get all vulnerabilities in the
+        # repository (including the acknowledged ones).
+        run: rm -f .trivyignore
+
       - name: Run Trivy scan and output SARIF
         uses: aquasecurity/trivy-action@v0.36.0
         continue-on-error: true
@@ -51,31 +56,6 @@ jobs:
           severity: MEDIUM,HIGH,CRITICAL
 
       - name: Upload SARIF file to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.6
         with:
           sarif_file: trivy-results.sarif
-
-      - name: Check if Trivy report contains vulnerabilities
-        id: check-vulns
-        run: |
-          count=$(jq '.runs[0].results | length' trivy-results.sarif)
-          echo "Vulnerability count: $count"
-          echo "count=$count" >> $GITHUB_OUTPUT
-
-      - name: Generate Trivy issue summary
-        if: steps.check-vulns.outputs.count != '0'
-        run: |
-          echo "# Vulnerabilities found in image \`ghcr.io/${{ github.repository }}:${{ steps.get-tag.outputs.tag }}\`" > trivy-results.md
-          echo "" >> trivy-results.md
-          echo "**Scan summary:**" >> trivy-results.md
-          jq -r '.runs[0].results[] | "- \(.ruleId) in \(.locations[0].physicalLocation.artifactLocation.uri): \(.message.text)"' trivy-results.sarif >> trivy-results.md
-          echo "" >> trivy-results.md
-          echo "[View full scan results in GitHub Security tab](${{ github.server_url }}/${{ github.repository }}/security/code-scanning)" >> trivy-results.md
-
-      - name: Create GitHub Issue for Vulnerabilities
-        if: steps.check-vulns.outputs.count != '0'
-        uses: peter-evans/create-issue-from-file@v6
-        with:
-          title: "Trivy Scan: Vulnerabilities found in image `${{ steps.get-tag.outputs.tag }}`"
-          content-filepath: trivy-results.md
-          labels: security,trivy
