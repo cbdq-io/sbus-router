@@ -1,7 +1,7 @@
 # Changelog
 
 
-## Unreleased
+## 2.3.3 (2026-08-12)
 
 ### Fix
 
