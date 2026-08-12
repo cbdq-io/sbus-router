@@ -5,6 +5,10 @@
 
 ### Fix
 
+* Update the periodic scan. [Ben Dalling]
+
+* Add basic instructions for creating a release. [Ben Dalling]
+
 * Acknowledge vulnerabilities. [Ben Dalling]
 
 * Change Dockerfile to use UID not name. [Ben Dalling]
