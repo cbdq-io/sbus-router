@@ -5,6 +5,20 @@
 
 ### Build
 
+* Bump cbdq-io/gitflow-action from 1.0.6 to 1.0.7. [dependabot[bot]]
+
+  Bumps [cbdq-io/gitflow-action](https://github.com/cbdq-io/gitflow-action) from 1.0.6 to 1.0.7.
+  - [Changelog](https://github.com/cbdq-io/gitflow-action/blob/develop/CHANGELOG.md)
+  - [Commits](https://github.com/cbdq-io/gitflow-action/compare/1.0.6...1.0.7)
+
+  ---
+  updated-dependencies:
+  - dependency-name: cbdq-io/gitflow-action
+    dependency-version: 1.0.7
+    dependency-type: direct:production
+    update-type: version-update:semver-patch
+  ...
+
 * Bump github/codeql-action from 4.37.6 to 4.37.7. [dependabot[bot]]
 
   Bumps [github/codeql-action](https://github.com/github/codeql-action) from 4.37.6 to 4.37.7.
