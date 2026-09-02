@@ -3,6 +3,69 @@
 
 ## Unreleased
 
+### Build
+
+* Bump github/codeql-action from 4.37.8 to 4.37.9. [dependabot[bot]]
+
+  Bumps [github/codeql-action](https://github.com/github/codeql-action) from 4.37.8 to 4.37.9.
+  - [Release notes](https://github.com/github/codeql-action/releases)
+  - [Changelog](https://github.com/github/codeql-action/blob/main/CHANGELOG.md)
+  - [Commits](https://github.com/github/codeql-action/compare/v4.37.8...v4.37.9)
+
+  ---
+  updated-dependencies:
+  - dependency-name: github/codeql-action
+    dependency-version: 4.37.9
+    dependency-type: direct:production
+    update-type: version-update:semver-patch
+  ...
+
+* Bump github/codeql-action from 4.37.7 to 4.37.8. [dependabot[bot]]
+
+  Bumps [github/codeql-action](https://github.com/github/codeql-action) from 4.37.7 to 4.37.8.
+  - [Release notes](https://github.com/github/codeql-action/releases)
+  - [Changelog](https://github.com/github/codeql-action/blob/main/CHANGELOG.md)
+  - [Commits](https://github.com/github/codeql-action/compare/v4.37.7...v4.37.8)
+
+  ---
+  updated-dependencies:
+  - dependency-name: github/codeql-action
+    dependency-version: 4.37.8
+    dependency-type: direct:production
+    update-type: version-update:semver-patch
+  ...
+
+* Bump cbdq-io/gitflow-action from 1.0.6 to 1.0.7. [dependabot[bot]]
+
+  Bumps [cbdq-io/gitflow-action](https://github.com/cbdq-io/gitflow-action) from 1.0.6 to 1.0.7.
+  - [Changelog](https://github.com/cbdq-io/gitflow-action/blob/develop/CHANGELOG.md)
+  - [Commits](https://github.com/cbdq-io/gitflow-action/compare/1.0.6...1.0.7)
+
+  ---
+  updated-dependencies:
+  - dependency-name: cbdq-io/gitflow-action
+    dependency-version: 1.0.7
+    dependency-type: direct:production
+    update-type: version-update:semver-patch
+  ...
+
+* Bump github/codeql-action from 4.37.6 to 4.37.7. [dependabot[bot]]
+
+  Bumps [github/codeql-action](https://github.com/github/codeql-action) from 4.37.6 to 4.37.7.
+  - [Changelog](https://github.com/github/codeql-action/blob/main/CHANGELOG.md)
+  - [Commits](https://github.com/github/codeql-action/compare/v4.37.6...v4.37.7)
+
+  ---
+  updated-dependencies:
+  - dependency-name: github/codeql-action
+    dependency-version: 4.37.7
+    dependency-type: direct:production
+    update-type: version-update:semver-patch
+  ...
+
+
+## 2.3.3 (2026-08-12)
+
 ### Fix
 
 * Update the periodic scan. [Ben Dalling]
