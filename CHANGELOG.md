@@ -1,7 +1,7 @@
 # Changelog
 
 
-## Unreleased
+## 2.3.4 (2026-09-02)
 
 ### Build
 
