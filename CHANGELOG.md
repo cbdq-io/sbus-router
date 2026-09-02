@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+### Fix
+
+* Release/2.3.4. [James Loughlin]
+
 ### Build
 
 * Bump github/codeql-action from 4.37.8 to 4.37.9. [dependabot[bot]]
