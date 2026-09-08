@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+### Fix
+
+* Handle messages exceeding Service Bus batch size. [Ben Dalling]
+
 ### Build
 
 * Bump cbdq-io/gitflow-action from 1.0.7 to 1.0.8. [dependabot[bot]]
