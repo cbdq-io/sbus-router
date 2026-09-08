@@ -725,7 +725,7 @@ class ServiceBusHandler:
             self._pending.add(fut)
             try:
                 self.queue.put_nowait((msg, fut))
-                await fut
+                _ = await fut
             finally:
                 self._pending.discard(fut)
 
