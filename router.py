@@ -59,10 +59,11 @@ from azure.servicebus import (NEXT_AVAILABLE_SESSION, ServiceBusMessage,
 from azure.servicebus.aio import (AutoLockRenewer, ServiceBusClient,
                                   ServiceBusReceiver)
 from azure.servicebus.amqp import AmqpMessageBodyType
-from azure.servicebus.exceptions import OperationTimeoutError
+from azure.servicebus.exceptions import (MessageSizeExceededError,
+                                         OperationTimeoutError)
 from prometheus_client import Counter, Summary, start_http_server
 
-__version__ = '2.3.4'
+__version__ = '2.3.5'
 PROCESSING_TIME = Summary('message_processing_seconds', 'The time spent processing messages.')
 DLQ_COUNT = Counter('dlq_message_count', 'The number of messages sent to the DLQ.')
 SESSION_RECEIVER_CREATED = Counter(
@@ -699,34 +700,74 @@ class ServiceBusHandler:
         that message completes (success or exception).
         """
 
-        def __init__(self, sender_factory: Callable, max_wait_ms: int, max_msgs: int, topic_name: str):
+        # Large-message-enabled links may advertise more than the batch limit.
+        _MAX_BATCH_SIZE_BYTES = 1024 * 1024
+
+        def __init__(self, sender_factory: Callable, max_wait_ms: int, max_msgs: int, topic_name: str,
+                     namespace: str = ''):
             self.sender_factory = sender_factory
             self.queue: asyncio.Queue[Optional[tuple[ServiceBusMessage, asyncio.Future]]] = asyncio.Queue()
             self.max_wait = max_wait_ms / 1000.0
             self.max_msgs = max_msgs
             self.topic_name = topic_name
-            self._task = asyncio.create_task(self._run())
+            self.namespace = namespace
             self._sender = None
+            self._closing = False
+            self._pending: set[asyncio.Future] = set()
+            self._operation = 'idle'
+            self._task = asyncio.create_task(self._run())
+            self._task.add_done_callback(self._on_stopped)
 
         async def add_and_wait(self, msg: ServiceBusMessage) -> None:
+            if self._closing or self._task.done():
+                raise RuntimeError(f'Batcher is closed for {self.namespace}/{self.topic_name}')
             fut: asyncio.Future = asyncio.get_running_loop().create_future()
-            await self.queue.put((msg, fut))
-            await fut
+            self._pending.add(fut)
+            try:
+                self.queue.put_nowait((msg, fut))
+                _ = await fut
+            finally:
+                self._pending.discard(fut)
 
         async def close(self) -> None:
-            await self.queue.put(None)
+            if not self._closing:
+                self._closing = True
+                self.queue.put_nowait(None)
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
 
+        def _on_stopped(self, task: asyncio.Task) -> None:
+            self._closing = True
+            error = None if task.cancelled() else task.exception()
+            if error is not None:
+                logger.error('Batcher stopped for %s/%s: %s', self.namespace, self.topic_name, type(error).__name__,
+                             exc_info=(type(error), error, error.__traceback__))
+            error = error or RuntimeError(f'Batcher is closed for {self.namespace}/{self.topic_name}')
+            for fut in self._pending:
+                if not fut.done():
+                    fut.set_exception(error)
+            # Release queued messages even if cancellation happened during coalescing.
+            while not self.queue.empty():
+                self.queue.get_nowait()
+
         async def _run(self):
-            self._sender = await self.sender_factory()
             while True:
                 items = await self._coalesce()
                 if items is None:
-                    # sentinel -> flush nothing further and exit
-                    await self._flush([])
-                    break
-                await self._flush(items)
+                    return
+                try:
+                    if self._sender is None:
+                        self._operation = 'open_sender'
+                        self._sender = await self.sender_factory()
+                    await self._flush(items)
+                except Exception as e:
+                    logger.exception('Batcher failed for %s/%s during %s: %s',
+                                     self.namespace, self.topic_name, self._operation, type(e).__name__)
+                    for _, fut in items:
+                        if not fut.done():
+                            fut.set_exception(e)
+                    # No send retry here: an exception can have an uncertain broker outcome.
+                    # Later deliveries can use this worker; a failed sender open is retried then.
 
         async def _coalesce(self):
             first = await self.queue.get()
@@ -752,38 +793,49 @@ class ServiceBusHandler:
 
             return items
 
+        async def _create_batch(self):
+            self._operation = 'create_message_batch'
+            batch = await self._sender.create_message_batch()
+            if batch.max_size_in_bytes > self._MAX_BATCH_SIZE_BYTES:
+                batch = await self._sender.create_message_batch(max_size_in_bytes=self._MAX_BATCH_SIZE_BYTES)
+            return batch
+
+        async def _send(self, payload, items, operation):
+            if not items:
+                return
+            self._operation = operation
+            await self._sender.send_messages(payload)
+            for _, fut in items:
+                if not fut.done():
+                    fut.set_result(True)
+
         async def _flush(self, items):
             if not items:
                 return
 
-            batch = await self._sender.create_message_batch()
+            batch = await self._create_batch()
             pending: list[tuple[ServiceBusMessage, asyncio.Future]] = []
-
-            async def flush_batch():
-                if not pending:
-                    return
-                try:
-                    await self._sender.send_messages(batch)
-                    for _, fut in pending:
-                        if not fut.done():
-                            fut.set_result(True)
-                except Exception as e:
-                    for _, fut in pending:
-                        if not fut.done():
-                            fut.set_exception(e)
-
             for msg, fut in items:
+                self._operation = 'add_message'
                 try:
                     batch.add_message(msg)
-                    pending.append((msg, fut))
-                except ValueError:
-                    # current batch full -> send and start a new one
-                    await flush_batch()
-                    batch = await self._sender.create_message_batch()
-                    batch.add_message(msg)
-                    pending = [(msg, fut)]
+                except MessageSizeExceededError:
+                    if pending:
+                        await self._send(batch, pending, 'send_batch')
+                        pending = []
+                        batch = await self._create_batch()
+                    self._operation = 'add_message_to_empty_batch'
+                    try:
+                        batch.add_message(msg)
+                    except MessageSizeExceededError:
+                        logger.warning('Sending individually to %s/%s: message_id=%s exceeds batch capacity=%d bytes',
+                                       self.namespace, self.topic_name, msg.message_id, batch.max_size_in_bytes)
+                        # Pass the message itself, not a list (which would batch it again).
+                        await self._send(msg, [(msg, fut)], 'send_individual')
+                        continue
+                pending.append((msg, fut))
 
-            await flush_batch()
+            await self._send(batch, pending, 'send_batch')
 
     def __init__(self, config: EnvironmentConfigParser):
         self.source_connection_string = config.get_source_connection_string()
@@ -1089,6 +1141,7 @@ class ServiceBusHandler:
                 max_wait_ms=self._BATCH_MAX_WAIT_MS,
                 max_msgs=self._BATCH_MAX_MESSAGES,
                 topic_name=topic,
+                namespace=namespace,
             )
         return self.batchers[key]
 
