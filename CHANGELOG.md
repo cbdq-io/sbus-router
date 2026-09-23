@@ -5,6 +5,45 @@
 
 ### Fix
 
+* Release/2.3.6. [James Loughlin]
+
+### Build
+
+* Bump github/codeql-action from 4.38.0 to 4.38.1. [dependabot[bot]]
+
+  Bumps [github/codeql-action](https://github.com/github/codeql-action) from 4.38.0 to 4.38.1.
+  - [Release notes](https://github.com/github/codeql-action/releases)
+  - [Changelog](https://github.com/github/codeql-action/blob/main/CHANGELOG.md)
+  - [Commits](https://github.com/github/codeql-action/compare/v4.38.0...v4.38.1)
+
+  ---
+  updated-dependencies:
+  - dependency-name: github/codeql-action
+    dependency-version: 4.38.1
+    dependency-type: direct:production
+    update-type: version-update:semver-patch
+  ...
+
+* Bump github/codeql-action from 4.37.9 to 4.38.0. [dependabot[bot]]
+
+  Bumps [github/codeql-action](https://github.com/github/codeql-action) from 4.37.9 to 4.38.0.
+  - [Release notes](https://github.com/github/codeql-action/releases)
+  - [Changelog](https://github.com/github/codeql-action/blob/main/CHANGELOG.md)
+  - [Commits](https://github.com/github/codeql-action/compare/v4.37.9...v4.38.0)
+
+  ---
+  updated-dependencies:
+  - dependency-name: github/codeql-action
+    dependency-version: 4.38.0
+    dependency-type: direct:production
+    update-type: version-update:semver-minor
+  ...
+
+
+## 2.3.5 (2026-09-09)
+
+### Fix
+
 * Handle messages exceeding Service Bus batch size. [Ben Dalling]
 
 ### Build
