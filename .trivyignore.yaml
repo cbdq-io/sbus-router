@@ -1,0 +1,14 @@
+---
+vulnerabilities:
+  - id: CVE-2025-47273
+    statement: present in upstream image
+  - id: CVE-2026-59890
+    statement: present in upstream image
+  - id: GHSA-6v7p-g79w-8964
+    statement: present in upstream image
+  - id: CVE-2026-97687
+    statement: present in upstream image
+  - id: CVE-2026-97689
+    statement: present in upstream image
+  - id: CVE-2026-97688
+    statement: present in upstream image
