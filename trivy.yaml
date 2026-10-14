@@ -2,7 +2,11 @@
 # Config file for Trivy.
 exit-code: 1
 
+skip-version-check: false
+
 format: table
+
+ignorefile: .trivyignore.yaml
 
 pkg:
   type:
@@ -10,6 +14,8 @@ pkg:
     - library
 
 scan:
+  disable-telemetry: true
+  show-suppressed: true
   skip-files: []
 
 severity:
@@ -22,3 +28,6 @@ scanners:
 
 vulnerability:
   ignore-unfixed: true
+
+image:
+  show-suppressed: true
