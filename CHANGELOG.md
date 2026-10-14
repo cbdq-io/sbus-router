@@ -3,6 +3,12 @@
 
 ## Unreleased
 
+### Fix
+
+* Migrate from .trivyignore to .trivyignore.yaml. [Ben Dalling]
+
+* Configure a later version of Trivy in CI. [Ben Dalling]
+
 ### Build
 
 * Bump github/codeql-action from 4.38.1 to 4.38.2. [dependabot[bot]]
