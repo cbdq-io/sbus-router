@@ -1,6 +1,15 @@
 # Changelog
 
 
+## Unreleased
+
+### Fix
+
+* Correct JSON escaping after pytest-bdd 9 upgrade. [Ben Dalling]
+
+* If the Trivy ignore file is YAML it must exist. [Ben Dalling]
+
+
 ## 2.3.7 (2026-10-14)
 
 ### Fix

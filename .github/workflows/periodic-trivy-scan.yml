@@ -44,7 +44,7 @@ jobs:
       - name: Remove Trivy Ignore File
         # Temp removal of the file so that we get all vulnerabilities in the
         # repository (including the acknowledged ones).
-        run: rm -f .trivyignore.yaml
+        run: echo '---' > .trivyignore.yaml
 
       - name: Run Trivy scan and output SARIF
         uses: aquasecurity/trivy-action@v0.36.0
