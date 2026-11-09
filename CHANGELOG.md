@@ -3,6 +3,10 @@
 
 ## Unreleased
 
+### Fix
+
+* Async completion of messages. [Ben Dalling]
+
 ### Build
 
 * Bump github/codeql-action from 4.39.1 to 4.39.3. [dependabot[bot]]

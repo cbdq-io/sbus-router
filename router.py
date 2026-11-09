@@ -872,7 +872,12 @@ class ServiceBusHandler:
 
     async def _process_limited(self, topic_name, message, receiver):
         async with self._sem:
-            await self.process_message(topic_name, message, receiver)
+            return await self.process_message(
+                topic_name,
+                message,
+                receiver,
+                defer_completion=True,
+            )
 
     async def close(self) -> None:
         """Gracefully close all batchers, clients and senders."""
@@ -1006,7 +1011,7 @@ class ServiceBusHandler:
 
     @PROCESSING_TIME.time()
     async def process_message(self, source_topic: str, message: ServiceBusReceivedMessage,
-                              receiver: ServiceBusReceiver):
+                              receiver: ServiceBusReceiver, defer_completion: bool = False):
         """
         Process the received message asynchronously.
 
@@ -1049,12 +1054,17 @@ class ServiceBusHandler:
                     await receiver.abandon_message(message)
                     return
 
+                if defer_completion:
+                    return message
+
                 try:
                     await receiver.complete_message(message)
                     return
                 except Exception as e:
                     logger.error(f'Send succeeded but complete failed: {e}')
                     await receiver.abandon_message(message)
+
+                return None
 
         # No matching rule: Send to DLQ
         logger.warning(f'No rules match message from {source_topic}, sending to the DLQ.')
@@ -1085,10 +1095,29 @@ class ServiceBusHandler:
                 if not messages:
                     continue
 
-                await asyncio.gather(*[
+                completed_messages = await asyncio.gather(*[
                     self._process_limited(topic_name, message, receiver)
                     for message in messages
                 ])
+
+                completed_messages = [
+                    message
+                    for message in completed_messages
+                    if message is not None
+                ]
+
+                results = await asyncio.gather(
+                    *(receiver.complete_message(message) for message in completed_messages),
+                    return_exceptions=True,
+                )
+
+                for message, result in zip(completed_messages, results):
+                    if isinstance(result, Exception):
+                        logger.error(
+                            'Send succeeded but complete failed for message %s: %s',
+                            message.message_id,
+                            result,
+                        )
 
     async def receive_and_process(self, topic_name, subscription_name, session_id: str = None):
         """Receive messages, process them, and forward."""
