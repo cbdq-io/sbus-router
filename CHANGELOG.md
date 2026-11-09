@@ -3,6 +3,23 @@
 
 ## Unreleased
 
+### Build
+
+* Bump ghcr.io/devcontainers/features/python. [dependabot[bot]]
+
+  Bumps ghcr.io/devcontainers/features/python from 1.8.0 to 1.8.1.
+
+  ---
+  updated-dependencies:
+  - dependency-name: ghcr.io/devcontainers/features/python
+    dependency-version: 1.8.1
+    dependency-type: direct:production
+    update-type: version-update:semver-patch
+  ...
+
+
+## 2.3.8 (2026-11-09)
+
 ### Fix
 
 * Correct JSON escaping after pytest-bdd 9 upgrade. [Ben Dalling]
