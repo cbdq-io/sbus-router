@@ -9,6 +9,21 @@
 
 ### Build
 
+* Bump github/codeql-action from 4.39.3 to 4.39.4. [dependabot[bot]]
+
+  Bumps [github/codeql-action](https://github.com/github/codeql-action) from 4.39.3 to 4.39.4.
+  - [Release notes](https://github.com/github/codeql-action/releases)
+  - [Changelog](https://github.com/github/codeql-action/blob/main/CHANGELOG.md)
+  - [Commits](https://github.com/github/codeql-action/compare/v4.39.3...v4.39.4)
+
+  ---
+  updated-dependencies:
+  - dependency-name: github/codeql-action
+    dependency-version: 4.39.4
+    dependency-type: direct:production
+    update-type: version-update:semver-patch
+  ...
+
 * Bump cbdq-io/gitflow-action from 1.1.0 to 1.1.2. [dependabot[bot]]
 
   Bumps [cbdq-io/gitflow-action](https://github.com/cbdq-io/gitflow-action) from 1.1.0 to 1.1.2.
